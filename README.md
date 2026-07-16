@@ -14,9 +14,12 @@ npm install
 ### 2. Set environment variables
 ```bash
 cp .env.example .env
-# Edit .env and add your Anthropic API key:
-# ANTHROPIC_API_KEY=sk-ant-api03-...
+# Edit .env and add:
+# ANTHROPIC_API_KEY=sk-ant-api03-...        (server-side, for AI essay scoring)
+# VITE_ASSESSMENT_URL=https://script.google.com/macros/s/.../exec   (your Apps Script Web App URL)
 ```
+
+> **VITE_ASSESSMENT_URL** is baked into the frontend at build time, so applicants only ever enter their code — they never see or type the server URL. Set it in Vercel under Settings > Environment Variables and redeploy whenever it changes.
 
 ### 3. Run locally
 ```bash
@@ -57,7 +60,6 @@ Hi [Name],
 Please complete your PS Apprentice Assessment at:
 https://your-app.vercel.app
 
-Assessment server URL: https://script.google.com/macros/s/.../exec
 Your personal code: HFPS001
 
 Your code can only be used once. Once submitted, it cannot be reused.
@@ -66,7 +68,7 @@ Your code can only be used once. Once submitted, it cannot be reused.
 ---
 
 ## How code validation works
-1. Candidate enters URL + code → app makes GET request to Apps Script
+1. Candidate enters their code → app makes GET request to the configured Apps Script URL
 2. Apps Script checks the Codes sheet: code must exist and be "Unused"
 3. Valid → candidate's name is loaded from the sheet, assessment begins
 4. On submission → code is marked "Used", results written to Submissions sheet

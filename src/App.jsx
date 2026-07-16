@@ -56,6 +56,9 @@ const TOTAL_OBJ=OBJ_SECS.reduce((a,s)=>a+s.qs.length,0)
 const TOTAL_Q=SECS.reduce((a,s)=>a+s.qs.length,0)
 
 // ═══════════════ API ════════════════════════════════════════════
+// Google Apps Script Web App URL (ends in /exec). Set VITE_ASSESSMENT_URL in your env / Vercel.
+const ASSESSMENT_URL = import.meta.env.VITE_ASSESSMENT_URL || ""
+
 async function validateCode(url, code) {
   const res = await fetch(`${url}?action=validate&code=${encodeURIComponent(code)}`, { mode:"cors" })
   if (!res.ok) throw new Error("Network error")
@@ -84,7 +87,6 @@ async function postToSheets(url, payload) {
 // ═══════════════ APP ════════════════════════════════════════════
 export default function App() {
   const [phase, setPhase]           = useState("welcome")
-  const [assessUrl, setAssessUrl]   = useState("")
   const [code, setCode]             = useState("")
   const [codeError, setCodeError]   = useState("")
   const [candidateName, setCandidateName] = useState("")
@@ -103,7 +105,7 @@ export default function App() {
   useEffect(() => {
     if (phase !== "assessing" && phase !== "done") return
     const key = `ps_${code.trim().toUpperCase()}`
-    try { localStorage.setItem(key, JSON.stringify({assessUrl,code,candidateName,answers,essayTexts,aiScores,phase})) } catch {}
+    try { localStorage.setItem(key, JSON.stringify({code,candidateName,answers,essayTexts,aiScores,phase})) } catch {}
   }, [answers, essayTexts, aiScores, phase])
 
   const restoreSession = (savedCode) => {
@@ -115,7 +117,6 @@ export default function App() {
         if (d.answers)    setAnswers(d.answers)
         if (d.essayTexts) setEssayTexts(d.essayTexts)
         if (d.aiScores)   setAiScores(d.aiScores)
-        if (d.assessUrl)  setAssessUrl(d.assessUrl)
         return true
       }
     } catch {}
@@ -123,10 +124,11 @@ export default function App() {
   }
 
   const handleValidate = async () => {
-    if (!assessUrl.trim() || !code.trim()) return
+    if (!code.trim()) return
+    if (!ASSESSMENT_URL) { setCodeError("Assessment is not configured yet. Please contact your administrator."); return }
     setPhase("validating"); setCodeError("")
     try {
-      const data = await validateCode(assessUrl.trim(), code.trim().toUpperCase())
+      const data = await validateCode(ASSESSMENT_URL, code.trim().toUpperCase())
       if (data.valid) {
         setCandidateName(data.name || code.trim().toUpperCase())
         restoreSession(code.trim().toUpperCase())
@@ -203,8 +205,8 @@ export default function App() {
       candidateName,objectiveScore:`${correctObj}/${TOTAL_OBJ}`,
       objectivePercent:`${Math.round((correctObj/TOTAL_OBJ)*100)}%`,
       objectiveResults:objRows,essayResults:esRows}
-    if(assessUrl.trim()){
-      try { await postToSheets(assessUrl.trim(),payload); setSubmitMsg("Saved!") }
+    if(ASSESSMENT_URL){
+      try { await postToSheets(ASSESSMENT_URL,payload); setSubmitMsg("Saved!") }
       catch { setSubmitMsg("Results saved locally.") }
     }
     setPhase("done"); setPanel("results")
@@ -231,17 +233,14 @@ export default function App() {
       <div style={{maxWidth:380,width:"100%"}}>
         <div style={{fontSize:10,color:C.textMute,fontFamily:"var(--font-mono)",letterSpacing:"0.08em",marginBottom:6}}>helpflow.net // ps-assessment</div>
         <div style={{fontSize:26,fontWeight:500,color:C.text,fontFamily:"var(--font-sans)",marginBottom:6}}>PS Apprentice Assessment</div>
-        <div style={{fontSize:13,color:C.textSec,lineHeight:1.7,marginBottom:28}}>Enter the assessment server URL and your personal code to begin. Each code is single-use only.</div>
-
-        <div style={{fontSize:11,color:C.textMute,marginBottom:5}}>Assessment server URL</div>
-        <input value={assessUrl} onChange={e=>setAssessUrl(e.target.value)} placeholder="https://script.google.com/macros/s/.../exec" style={{width:"100%",marginBottom:14,fontFamily:"var(--font-mono)",fontSize:12}} disabled={phase==="validating"} />
+        <div style={{fontSize:13,color:C.textSec,lineHeight:1.7,marginBottom:28}}>Enter your personal code to begin. Each code is single-use only.</div>
 
         <div style={{fontSize:11,color:C.textMute,marginBottom:5}}>Your assessment code</div>
         <input value={code} onChange={e=>setCode(e.target.value.toUpperCase())} placeholder="e.g. HFPS001" style={{width:"100%",marginBottom:16,fontFamily:"var(--font-mono)",fontSize:16,letterSpacing:"0.14em"}} disabled={phase==="validating"} onKeyDown={e=>e.key==="Enter"&&handleValidate()} />
 
         {codeError&&<div style={{padding:"10px 12px",background:C.bgDanger,border:`0.5px solid ${C.bdDanger}`,borderRadius:6,fontSize:13,color:C.danger,marginBottom:14,lineHeight:1.5}}>{codeError}</div>}
 
-        <button onClick={handleValidate} disabled={!assessUrl.trim()||!code.trim()||phase==="validating"} style={{...subBtn,width:"100%",fontSize:14,padding:"10px 20px"}}>
+        <button onClick={handleValidate} disabled={!code.trim()||phase==="validating"} style={{...subBtn,width:"100%",fontSize:14,padding:"10px 20px"}}>
           {phase==="validating"?"Validating…":"Validate & begin →"}
         </button>
 
