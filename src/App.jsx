@@ -165,6 +165,9 @@ export default function App() {
 
   const totalAnswered=Object.keys(answers).filter(k=>{const[s]=k.split("-").map(Number);return SECS[s].id!=="es"}).length
   const essaysDone=SECS[ES_IDX].qs.map((_,i)=>QK(ES_IDX,i)).filter(k=>essayTexts[k]?.trim()).length
+  const essayScoreList=SECS[ES_IDX].qs.map((_,i)=>aiScores[QK(ES_IDX,i)]?.score).filter(n=>typeof n==="number")
+  const essayTotal=essayScoreList.reduce((a,b)=>a+b,0)
+  const essayMax=SECS[ES_IDX].qs.length*5
 
   const navigate=(ns,nq)=>{setSi(ns);setQi(nq);if(editorRef.current)editorRef.current.scrollTop=0}
   const handleAnswer=v=>setAnswers(a=>({...a,[qk]:String(v)}))
@@ -277,7 +280,7 @@ export default function App() {
       </div>
       <div style={{fontSize:12,color:C.textSec,marginBottom:22}}>Code: {code.toUpperCase()} · {new Date().toLocaleDateString()}</div>
       <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12,marginBottom:28}}>
-        {[{l:"Objective score",v:`${correctObj} / ${TOTAL_OBJ}`},{l:"Percentage",v:`${Math.round((correctObj/TOTAL_OBJ)*100)}%`},{l:"Essays scored",v:`${Object.keys(aiScores).length} / ${SECS[ES_IDX].qs.length}`}].map(c=>(
+        {[{l:"Objective score",v:`${correctObj} / ${TOTAL_OBJ}`},{l:"Percentage",v:`${Math.round((correctObj/TOTAL_OBJ)*100)}%`},{l:"Essay score",v:`${essayTotal} / ${essayMax}`}].map(c=>(
           <div key={c.l} style={{background:C.bg1,borderRadius:8,padding:"14px 16px"}}>
             <div style={{fontSize:10,color:C.textMute,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:6}}>{c.l}</div>
             <div style={{fontSize:24,fontWeight:500,color:C.text}}>{c.v}</div>
