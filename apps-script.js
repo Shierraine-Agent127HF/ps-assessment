@@ -50,13 +50,13 @@ function doPost(e) {
     }
   }
 
-  // 2. Write full results to Submissions sheet
-  let sub = ss.getSheetByName("Submissions")
-  if (!sub) sub = ss.insertSheet("Submissions")
+  // 2. Write full results to the "Assessment Result" sheet
+  let sub = ss.getSheetByName("Assessment Result")
+  if (!sub) sub = ss.insertSheet("Assessment Result")
 
   if (sub.getLastRow() === 0) {
     const headers = [
-      "Timestamp", "Code", "Candidate Name", "Objective Score", "Objective %",
+      "Timestamp", "Code", "Candidate Email", "Objective Score", "Objective %",
       ...data.objectiveResults.map((_, i) => `Q${i + 1} Answer`),
       ...data.objectiveResults.map((_, i) => `Q${i + 1} Correct?`),
       ...data.essayResults.map((_, i) => `Essay ${i + 1} Score`),
