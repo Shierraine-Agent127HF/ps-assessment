@@ -71,8 +71,11 @@ async function scoreEssayAI(question, hint, response) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ question, hint, response })
   })
-  if (!res.ok) throw new Error('Score API failed')
-  return res.json()
+  // The API returns { score, feedback } even on errors (e.g. missing key) —
+  // surface that specific message instead of a generic failure.
+  const data = await res.json().catch(() => null)
+  if (data && (data.score != null || data.feedback)) return data
+  throw new Error('Score API failed')
 }
 
 async function postToSheets(url, payload) {
