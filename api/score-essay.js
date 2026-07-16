@@ -13,24 +13,14 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'Missing required fields' })
   }
 
-  if (!process.env.ANTHROPIC_API_KEY) {
+  if (!process.env.GEMINI_API_KEY) {
     return res.status(500).json({ score: null, feedback: 'API key not configured on server.' })
   }
 
-  try {
-    const apiRes = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': process.env.ANTHROPIC_API_KEY,
-        'anthropic-version': '2023-06-01'
-      },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 400,
-        messages: [{
-          role: 'user',
-          content: `You are evaluating a job application essay for a Product Specialist Apprentice role. The role values critical thinking, attention to detail, clear communication, and process improvement.
+  // Free-tier Gemini flash model. Override with GEMINI_MODEL (e.g. gemini-3.5-flash).
+  const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash'
+
+  const prompt = `You are evaluating a job application essay for a Product Specialist Apprentice role. The role values critical thinking, attention to detail, clear communication, and process improvement.
 
 Question: ${question}
 Evaluator note: ${hint}
@@ -44,17 +34,41 @@ Score using exactly one of three points — 1, 3, or 5 (do not use 2 or 4):
 If a response falls between two levels, round to the nearest of 1, 3, or 5.
 
 Return ONLY valid JSON with no other text: {"score":N,"feedback":"1-2 specific sentences for the hiring team explaining the score"}`
-        }]
-      })
-    })
+
+  try {
+    const apiRes = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-goog-api-key': process.env.GEMINI_API_KEY
+        },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: {
+            temperature: 0.2,
+            maxOutputTokens: 2048,
+            responseMimeType: 'application/json'
+          }
+        })
+      }
+    )
 
     const data = await apiRes.json()
 
     if (data.error) {
-      return res.status(500).json({ score: null, feedback: 'AI scoring unavailable. Please try again.' })
+      return res.status(500).json({ score: null, feedback: `AI scoring unavailable: ${data.error.message || 'request rejected'}` })
     }
 
-    const result = JSON.parse(data.content[0].text.trim())
+    // Gemini returns text across one or more parts; join and parse.
+    const text = (data?.candidates?.[0]?.content?.parts || []).map(p => p.text || '').join('').trim()
+    if (!text) {
+      const reason = data?.candidates?.[0]?.finishReason || data?.promptFeedback?.blockReason || 'no content'
+      return res.status(500).json({ score: null, feedback: `AI scoring returned no result (${reason}). Please try again.` })
+    }
+
+    const result = JSON.parse(text)
     return res.json(result)
   } catch (error) {
     console.error('Score essay error:', error)

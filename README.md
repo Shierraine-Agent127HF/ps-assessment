@@ -15,7 +15,7 @@ npm install
 ```bash
 cp .env.example .env
 # Edit .env and add:
-# ANTHROPIC_API_KEY=sk-ant-api03-...        (server-side, for AI essay scoring)
+# GEMINI_API_KEY=AIza...                     (server-side, for AI essay scoring via Google Gemini)
 # VITE_ASSESSMENT_URL=https://script.google.com/macros/s/.../exec   (your Apps Script Web App URL)
 ```
 
@@ -30,7 +30,7 @@ npm run dev
 ```bash
 npm install -g vercel
 vercel
-# Follow prompts — add ANTHROPIC_API_KEY in Vercel dashboard under Settings > Environment Variables
+# Follow prompts — add GEMINI_API_KEY in Vercel dashboard under Settings > Environment Variables
 ```
 
 Or connect your GitHub repo to Vercel for automatic deploys.
