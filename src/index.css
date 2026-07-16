@@ -1,0 +1,82 @@
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --surface-0: #1e1e1e;
+  --surface-1: #252526;
+  --surface-2: #2d2d30;
+  --border: rgba(255,255,255,0.08);
+  --border-strong: rgba(255,255,255,0.18);
+  --text-primary: #d4d4d4;
+  --text-secondary: #9d9d9d;
+  --text-muted: #5a5a5a;
+  --bg-accent: rgba(0,122,204,0.2);
+  --border-accent: #007acc;
+  --text-accent: #4fc1ff;
+  --fill-accent: #007acc;
+  --on-accent: #ffffff;
+  --bg-success: rgba(78,201,176,0.15);
+  --border-success: #4ec9b0;
+  --text-success: #4ec9b0;
+  --bg-danger: rgba(241,76,76,0.15);
+  --border-danger: #f14c4c;
+  --text-danger: #f14c4c;
+  --bg-warning: rgba(220,220,170,0.15);
+  --border-warning: #dcdcaa;
+  --text-warning: #dcdcaa;
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'Consolas', 'Courier New', monospace;
+  --radius: 6px;
+}
+
+html, body, #root {
+  height: 100%;
+  width: 100%;
+}
+
+body {
+  background: var(--surface-0);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  overflow: hidden;
+}
+
+input {
+  background: var(--surface-1);
+  border: 0.5px solid var(--border-strong);
+  border-radius: var(--radius);
+  color: var(--text-primary);
+  padding: 8px 12px;
+  height: 36px;
+  font-family: inherit;
+  font-size: 13px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+input:focus { border-color: var(--border-accent); }
+input::placeholder { color: var(--text-muted); }
+input:disabled { opacity: 0.5; }
+
+textarea {
+  background: var(--surface-1);
+  border: 0.5px solid var(--border-strong);
+  border-radius: var(--radius);
+  color: var(--text-primary);
+  padding: 10px 12px;
+  font-family: inherit;
+  font-size: 13px;
+  outline: none;
+  resize: vertical;
+  line-height: 1.6;
+  transition: border-color 0.15s;
+}
+textarea:focus { border-color: var(--border-accent); }
+textarea::placeholder { color: var(--text-muted); }
+textarea:disabled { opacity: 0.6; }
+
+button { cursor: pointer; font-family: inherit; }
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
