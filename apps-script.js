@@ -48,6 +48,13 @@ function doPost(e) {
   const ss   = SpreadsheetApp.getActiveSpreadsheet()
   const code = (data.code || "").trim().toUpperCase()
 
+  // 0. Recording segment upload (screen + webcam). Each POST is one short .webm
+  //    clip; we file it into a per-applicant Drive folder named from the email in
+  //    the Codes sheet, with the one-time code referenced.
+  if (data.action === "uploadChunk") {
+    return handleUploadChunk(ss, code, data)
+  }
+
   // 1. Mark code as Used + record summary in Codes sheet
   const codeSheet = ss.getSheetByName("Codes")
   if (codeSheet) {
@@ -95,6 +102,78 @@ function doPost(e) {
   ])
 
   return respond({ success: true })
+}
+
+// Drive folder that holds every applicant's recording (the one you shared).
+// Each applicant gets a subfolder inside it. To point at a different folder,
+// paste its id (the part after /folders/ in the URL) here.
+const RECORDINGS_ROOT_ID = "1wz0iV5CTBquCRj8AlT6Yu4DQLa5fpfwv"
+
+// ── Recording: save one .webm clip into the applicant's Drive folder ──
+// A per-applicant subfolder named "<email> — <CODE>" is created inside
+// RECORDINGS_ROOT_ID (email pulled from Codes column B). The folder's shareable
+// LINK is written to Codes column H after the first clip, so you can click
+// straight to each applicant's recordings — and later clips reuse it instead of
+// re-searching Drive.
+// NOTE: this uses DriveApp — after adding it you MUST re-deploy the Web App and
+// accept the new Drive authorization prompt.
+function handleUploadChunk(ss, code, data) {
+  try {
+    const codeSheet = ss.getSheetByName("Codes")
+    if (!codeSheet) return respond({ success: false, error: "Codes sheet not found" })
+
+    const rows = codeSheet.getDataRange().getValues()
+    let rowIndex = -1, email = "", folderLink = ""
+    for (let i = 1; i < rows.length; i++) {
+      if (String(rows[i][0]).trim().toUpperCase() === code) {
+        rowIndex = i
+        email = String(rows[i][1] || "").trim()          // column B
+        folderLink = String(rows[i][7] || "").trim()     // column H (cached folder link)
+        break
+      }
+    }
+    if (rowIndex === -1) return respond({ success: false, error: "Code not found" })
+
+    const folder = getRecordingFolder(email, code, folderLink)
+    // Write the folder link into column H on the first clip (and repair it if the
+    // cached link points somewhere else). Compare by id so we don't rewrite it
+    // every request just because of a "?usp=..." query on the stored URL.
+    if (folderIdFromUrl(folderLink) !== folder.getId()) {
+      codeSheet.getRange(rowIndex + 1, 8).setValue(folder.getUrl())
+    }
+
+    const mime = data.mime || "video/webm"
+    const seg = String((data.segIndex != null ? data.segIndex : 0) + 1).padStart(3, "0")
+    const session = String(data.sessionId || "0")
+    const name = code + "_" + session + "_seg" + seg + ".webm"
+    const bytes = Utilities.base64Decode(data.dataBase64 || "")
+    const blob = Utilities.newBlob(bytes, mime, name)
+    folder.createFile(blob)
+
+    return respond({ success: true, folderUrl: folder.getUrl() })
+  } catch (err) {
+    return respond({ success: false, error: String(err) })
+  }
+}
+
+function getRecordingFolder(email, code, cachedLink) {
+  // Reuse the applicant's existing subfolder if column H already links to it.
+  const cachedId = folderIdFromUrl(cachedLink)
+  if (cachedId) {
+    try { return DriveApp.getFolderById(cachedId) } catch (e) { /* stale link → recreate below */ }
+  }
+  const root = DriveApp.getFolderById(RECORDINGS_ROOT_ID)
+  const subName = (email ? email : code) + " — " + code
+  const subs = root.getFoldersByName(subName)
+  return subs.hasNext() ? subs.next() : root.createFolder(subName)
+}
+
+// Pull the Drive id out of a folder link like
+// "https://drive.google.com/drive/folders/<id>?usp=drive_link".
+function folderIdFromUrl(url) {
+  const s = String(url || "")
+  const m = s.match(/\/folders\/([-\w]+)/) || s.match(/[-\w]{25,}/)
+  return m ? (m[1] || m[0]) : ""
 }
 
 function respond(obj) {

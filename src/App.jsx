@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react"
-import { Brain, Eye, Calendar, MessageSquare, Lightbulb, FileText, Sun, Moon, Clock } from "lucide-react"
+import { Brain, Eye, Calendar, MessageSquare, Lightbulb, FileText, Sun, Moon, Clock, Video, MonitorUp, AlertTriangle } from "lucide-react"
+import { AssessmentRecorder, isRecordingSupported } from "./recorder"
 
 // ═══════════════ DATA ═══════════════════════════════════════════
 const SECS = [
@@ -118,8 +119,15 @@ export default function App() {
   const [timeLeft, setTimeLeft]     = useState(null)   // ms remaining (null = timer not started)
   const [timedOut, setTimedOut]     = useState(false)
   const [theme, setTheme]           = useState(() => { try { return localStorage.getItem("ps_theme") || "dark" } catch { return "dark" } })
+  // ── Recording (screen + webcam, proctoring) ──
+  const [recStarting, setRecStarting] = useState(false)  // permission prompts in flight
+  const [recError, setRecError]       = useState("")     // "", "unsupported", "denied", or a message
+  const [recActive, setRecActive]     = useState(false)  // recording is live → show the REC indicator
+  const [screenLost, setScreenLost]   = useState(false)  // candidate stopped screen sharing → block until re-shared
   const editorRef = useRef(null)
   const autoSubmitRef = useRef(false)
+  const recorderRef = useRef(null)
+  const selfViewRef = useRef(null)
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme)
@@ -162,7 +170,8 @@ export default function App() {
         // deadline can't be reset by clearing the browser or switching devices.
         // (Older Apps Script without a timer omits remainingMs → no timer shown.)
         if (typeof data.remainingMs === "number") setDeadline(Date.now() + data.remainingMs)
-        setPhase("assessing")
+        // Gate the assessment behind the recording-consent screen — recording is mandatory.
+        setPhase("consent")
       } else {
         setCodeError(data.reason || "Invalid or already-used code.")
         setPhase("welcome")
@@ -172,6 +181,42 @@ export default function App() {
       setPhase("welcome")
     }
   }
+
+  // ── Recording lifecycle ──
+  const beginAssessment = async () => {
+    setRecError("")
+    if (!isRecordingSupported()) { setRecError("unsupported"); return }
+    setRecStarting(true)
+    try {
+      const rec = new AssessmentRecorder({
+        uploadUrl: ASSESSMENT_URL,
+        code: code.trim().toUpperCase(),
+        onScreenEnded: () => setScreenLost(true)
+      })
+      await rec.start()
+      recorderRef.current = rec
+      setRecActive(true)
+      setPhase("assessing")
+    } catch (err) {
+      const name = err && err.name
+      setRecError(name === "NotAllowedError" ? "denied" : (name === "NotFoundError" ? "nodevice" : (err && err.message) || "failed"))
+    } finally {
+      setRecStarting(false)
+    }
+  }
+
+  const handleReshare = async () => {
+    try { await recorderRef.current?.resume(); setScreenLost(false) }
+    catch { /* candidate cancelled again — keep the overlay up so they retry */ }
+  }
+
+  // Bind the on-screen self-view to the live camera stream once we're recording.
+  useEffect(() => {
+    if (phase === "assessing" && recActive && selfViewRef.current && recorderRef.current?.camStream) {
+      selfViewRef.current.srcObject = recorderRef.current.camStream
+      selfViewRef.current.play?.().catch(() => {})
+    }
+  }, [phase, recActive])
 
   const sec=SECS[si], q=sec.qs[qi], qk=QK(si,qi)
 
@@ -211,6 +256,10 @@ export default function App() {
   }
 
   const handleSubmit=async()=>{
+    // Stop recording now so the final clip captures up to submit time and starts
+    // uploading in the background while essays are scored. Awaited before "done".
+    const recStop = recorderRef.current ? recorderRef.current.stop().catch(()=>{}) : null
+    setRecActive(false); setScreenLost(false)
     setPhase("submitting"); setSubmitMsg("Scoring essays with AI…")
     const scores={...aiScores}
     for(let i=0;i<SECS[ES_IDX].qs.length;i++){
@@ -242,6 +291,7 @@ export default function App() {
       try { await postToSheets(ASSESSMENT_URL,payload); setSubmitMsg("Saved!") }
       catch { setSubmitMsg("Results saved locally.") }
     }
+    if (recStop) { setSubmitMsg("Finishing recording upload…"); await recStop }
     setPhase("done"); setPanel("results")
   }
 
@@ -312,6 +362,44 @@ export default function App() {
     </div>
   )
 
+  // ── Recording consent (mandatory, gates the assessment) ──
+  if(phase==="consent") return (
+    <div style={{...root,alignItems:"center",justifyContent:"center",padding:"0 20px",position:"relative"}}>
+      <button onClick={toggleTheme} title="Toggle light / dark" style={{...iconBtn,position:"absolute",top:18,right:18}}>
+        {theme==="dark"?<Sun size={15}/>:<Moon size={15}/>}
+      </button>
+      <div style={{maxWidth:420,width:"100%"}}>
+        <div style={{fontSize:10,color:C.textMute,fontFamily:"var(--font-mono)",letterSpacing:"0.08em",marginBottom:6}}>helpflow.net // ps-assessment</div>
+        <div style={{display:"flex",alignItems:"center",gap:9,marginBottom:8}}>
+          <Video size={20} style={{color:C.accent}}/>
+          <div style={{fontSize:22,fontWeight:500,color:C.text,fontFamily:"var(--font-sans)"}}>This assessment is recorded</div>
+        </div>
+        <div style={{fontSize:13,color:C.textSec,lineHeight:1.7,marginBottom:20}}>
+          To keep the assessment fair, your <strong>screen</strong>, <strong>camera</strong>, and <strong>microphone</strong> are recorded for the full session. When you continue, your browser will ask you to share your screen and allow your camera — please accept both. Recording is required to take the assessment.
+        </div>
+
+        {recError==="unsupported"?(
+          <div style={{padding:"12px 14px",background:C.bgDanger,border:`0.5px solid ${C.bdDanger}`,borderRadius:6,fontSize:13,color:C.danger,marginBottom:16,lineHeight:1.6}}>
+            Your browser can't screen-record. Please use a <strong>desktop</strong> Chrome, Edge, or Firefox (phones and tablets are not supported), then reopen this link.
+          </div>
+        ):recError?(
+          <div style={{padding:"12px 14px",background:C.bgDanger,border:`0.5px solid ${C.bdDanger}`,borderRadius:6,fontSize:13,color:C.danger,marginBottom:16,lineHeight:1.6}}>
+            {recError==="denied"?"Screen or camera access was blocked. Recording is required — please allow both when prompted and try again.":recError==="nodevice"?"No camera or microphone was found. Please connect one and try again.":"Couldn't start recording. Please try again."}
+          </div>
+        ):null}
+
+        <button onClick={beginAssessment} disabled={recStarting} style={{...subBtn,width:"100%",fontSize:14,padding:"11px 20px",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+          <MonitorUp size={16}/>{recStarting?"Waiting for permission…":"Enable recording & start assessment →"}
+        </button>
+
+        <div style={{marginTop:14,padding:"10px 12px",background:C.bg1,borderRadius:6,fontSize:11,color:C.textMute,lineHeight:1.7,display:"flex",gap:8,alignItems:"flex-start"}}>
+          <span style={{fontSize:15,flexShrink:0}}>🖥️</span>
+          <span>When prompted, choose to share your <strong>entire screen</strong> for the recording to be valid. If you stop sharing during the assessment, you'll be asked to share again before you can continue.</span>
+        </div>
+      </div>
+    </div>
+  )
+
   // ── Results ──
   const ResultsView=()=>(
     <div style={{padding:"28px 28px 48px",overflowY:"auto",flex:1,fontFamily:"var(--font-sans)"}}>
@@ -376,6 +464,32 @@ export default function App() {
 
   return (
     <div style={root}>
+      {/* On-screen self-view — reassures the candidate that recording is live */}
+      {recActive&&!isDone&&(
+        <div style={{position:"fixed",bottom:16,left:16,zIndex:40,width:160,borderRadius:10,overflow:"hidden",border:`1px solid ${C.bStr}`,background:"#000",boxShadow:"0 6px 20px rgba(0,0,0,0.35)"}}>
+          <video ref={selfViewRef} autoPlay muted playsInline style={{display:"block",width:"100%",height:"auto",transform:"scaleX(-1)"}}/>
+          <div style={{position:"absolute",top:6,left:6,display:"flex",alignItems:"center",gap:5,padding:"2px 7px",borderRadius:20,background:"rgba(0,0,0,0.55)",color:"#fff",fontSize:10,fontFamily:"var(--font-mono)",letterSpacing:"0.06em"}}>
+            <span style={{width:7,height:7,borderRadius:"50%",background:"#e04b4b",display:"inline-block"}}/>REC
+          </div>
+        </div>
+      )}
+
+      {/* Re-share overlay — blocks the exam if screen sharing is stopped mid-assessment */}
+      {screenLost&&!isDone&&(
+        <div style={{position:"fixed",inset:0,zIndex:60,background:"rgba(0,0,0,0.72)",display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+          <div style={{maxWidth:400,width:"100%",background:C.bg1,border:`0.5px solid ${C.bStr}`,borderRadius:12,padding:"26px 26px 24px",textAlign:"center"}}>
+            <AlertTriangle size={30} style={{color:C.warning,marginBottom:12}}/>
+            <div style={{fontSize:17,fontWeight:500,color:C.text,marginBottom:8}}>Screen sharing stopped</div>
+            <div style={{fontSize:13,color:C.textSec,lineHeight:1.7,marginBottom:20}}>
+              Recording is required for the whole assessment. Your timer is still running — share your screen again to continue.
+            </div>
+            <button onClick={handleReshare} style={{...subBtn,width:"100%",fontSize:14,padding:"11px 20px",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+              <MonitorUp size={16}/>Share screen & continue
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Title bar */}
       <div style={{height:44,background:C.bg1,borderBottom:`0.5px solid ${C.border}`,display:"flex",alignItems:"center",justifyContent:"space-between",padding:"0 16px",flexShrink:0}}>
         <div style={{fontSize:12,color:C.textSec,display:"flex",alignItems:"center",gap:8}}>
