@@ -254,20 +254,24 @@ export class AssessmentRecorder {
       mime: this.mime,
       dataBase64
     }
+    // Fire-and-forget with no-cors — the same way results are posted (Apps Script
+    // doesn't return a readable cross-origin response for these POSTs). The request
+    // still reaches the server and the file is written; we just can't read the reply.
+    // Retry only on a real network error, never on an unreadable response — that
+    // would double-send and create duplicate files in Drive.
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
-        const res = await fetch(this.uploadUrl, {
+        await fetch(this.uploadUrl, {
           method: "POST",
           headers: { "Content-Type": "text/plain" },   // simple request → no CORS preflight
           body: JSON.stringify(payload),
-          mode: "cors"
+          mode: "no-cors"
         })
-        if (res.ok) {
-          const data = await res.json().catch(() => null)
-          if (data && data.success) { this._status(`Saved clip ${idx + 1}`); return true }
-        }
-      } catch {}
-      await sleep(1000 * (attempt + 1))
+        this._status(`Uploaded clip ${idx + 1}`)
+        return true
+      } catch {
+        await sleep(1000 * (attempt + 1))
+      }
     }
     this._status(`Clip ${idx + 1} failed to upload`)
     return false
