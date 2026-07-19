@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react"
-import { Brain, Eye, Calendar, MessageSquare, Lightbulb, FileText, Sun, Moon } from "lucide-react"
+import { Brain, Eye, Calendar, MessageSquare, Lightbulb, FileText, Sun, Moon, Clock } from "lucide-react"
 
 // ═══════════════ DATA ═══════════════════════════════════════════
 const SECS = [
@@ -55,6 +55,18 @@ const ES_IDX=SECS.findIndex(s=>s.id==="es")
 const TOTAL_OBJ=OBJ_SECS.reduce((a,s)=>a+s.qs.length,0)
 const TOTAL_Q=SECS.reduce((a,s)=>a+s.qs.length,0)
 
+// ── Timed assessment ──
+// Total time allowed, shown on the welcome screen. The server (apps-script.js)
+// is the source of truth for the actual countdown — it returns the real
+// remaining time on every validation. Keep this in sync with DURATION_MIN there.
+const DURATION_MIN=90
+const fmtTime=ms=>{
+  const s=Math.max(0,Math.floor(ms/1000))
+  const h=Math.floor(s/3600),m=Math.floor((s%3600)/60),sec=s%60
+  const pad=n=>String(n).padStart(2,"0")
+  return h>0?`${h}:${pad(m)}:${pad(sec)}`:`${m}:${pad(sec)}`
+}
+
 // ═══════════════ API ════════════════════════════════════════════
 // Google Apps Script Web App URL (ends in /exec). Set VITE_ASSESSMENT_URL in your env / Vercel.
 const ASSESSMENT_URL = import.meta.env.VITE_ASSESSMENT_URL || ""
@@ -102,8 +114,12 @@ export default function App() {
   const [expanded, setExpanded]     = useState({0:true})
   const [panel, setPanel]           = useState("quiz")
   const [submitMsg, setSubmitMsg]   = useState("")
+  const [deadline, setDeadline]     = useState(null)   // local-clock ms timestamp when time expires (null = no timer)
+  const [timeLeft, setTimeLeft]     = useState(null)   // ms remaining (null = timer not started)
+  const [timedOut, setTimedOut]     = useState(false)
   const [theme, setTheme]           = useState(() => { try { return localStorage.getItem("ps_theme") || "dark" } catch { return "dark" } })
   const editorRef = useRef(null)
+  const autoSubmitRef = useRef(false)
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme)
@@ -142,6 +158,10 @@ export default function App() {
       if (data.valid) {
         setCandidateName(data.name || code.trim().toUpperCase())
         restoreSession(code.trim().toUpperCase())
+        // Server-anchored countdown: trust the server's remaining time so the
+        // deadline can't be reset by clearing the browser or switching devices.
+        // (Older Apps Script without a timer omits remainingMs → no timer shown.)
+        if (typeof data.remainingMs === "number") setDeadline(Date.now() + data.remainingMs)
         setPhase("assessing")
       } else {
         setCodeError(data.reason || "Invalid or already-used code.")
@@ -225,6 +245,24 @@ export default function App() {
     setPhase("done"); setPanel("results")
   }
 
+  // ── Countdown timer (server-anchored via deadline) ──
+  useEffect(() => {
+    if (phase !== "assessing" || deadline == null) return
+    const tick = () => setTimeLeft(Math.max(0, deadline - Date.now()))
+    tick()
+    const id = setInterval(tick, 1000)
+    return () => clearInterval(id)
+  }, [phase, deadline])
+
+  // ── Auto-submit when the clock hits zero (fires once) ──
+  useEffect(() => {
+    if (phase === "assessing" && deadline != null && timeLeft === 0 && !autoSubmitRef.current) {
+      autoSubmitRef.current = true
+      setTimedOut(true)
+      handleSubmit()
+    }
+  }, [phase, deadline, timeLeft])
+
   // ── Styles ──
   const C={
     bg0:"var(--surface-0)",bg1:"var(--surface-1)",bg2:"var(--surface-2)",
@@ -251,7 +289,7 @@ export default function App() {
       <div style={{maxWidth:380,width:"100%"}}>
         <div style={{fontSize:10,color:C.textMute,fontFamily:"var(--font-mono)",letterSpacing:"0.08em",marginBottom:6}}>helpflow.net // ps-assessment</div>
         <div style={{fontSize:26,fontWeight:500,color:C.text,fontFamily:"var(--font-sans)",marginBottom:6}}>PS Apprentice Assessment</div>
-        <div style={{fontSize:13,color:C.textSec,lineHeight:1.7,marginBottom:28}}>Enter your personal code to begin. Each code is single-use only.</div>
+        <div style={{fontSize:13,color:C.textSec,lineHeight:1.7,marginBottom:28}}>Enter your personal code to begin. You'll have {DURATION_MIN} minutes to complete it, and each code is single-use only.</div>
 
         <div style={{fontSize:11,color:C.textMute,marginBottom:5}}>Your assessment code</div>
         <input value={code} onChange={e=>setCode(e.target.value.toUpperCase())} placeholder="e.g. HFPS001" style={{width:"100%",marginBottom:16,fontFamily:"var(--font-mono)",fontSize:16,letterSpacing:"0.14em"}} disabled={phase==="validating"} onKeyDown={e=>e.key==="Enter"&&handleValidate()} />
@@ -262,7 +300,11 @@ export default function App() {
           {phase==="validating"?"Validating…":"Validate & begin →"}
         </button>
 
-        <div style={{marginTop:16,padding:"10px 12px",background:C.bg1,borderRadius:6,fontSize:11,color:C.textMute,lineHeight:1.7,display:"flex",gap:8,alignItems:"flex-start"}}>
+        <div style={{marginTop:16,padding:"10px 12px",background:C.bgWarning,border:`0.5px solid ${C.bdWarn}`,borderRadius:6,fontSize:11,color:C.warning,lineHeight:1.7,display:"flex",gap:8,alignItems:"flex-start"}}>
+          <span style={{fontSize:16,flexShrink:0}}>⏱️</span>
+          <span>You have <strong>{DURATION_MIN} minutes</strong>. The timer starts the moment you enter your code and keeps running even if you close the tab — so begin only when you're ready. When time runs out, your answers are submitted automatically.</span>
+        </div>
+        <div style={{marginTop:10,padding:"10px 12px",background:C.bg1,borderRadius:6,fontSize:11,color:C.textMute,lineHeight:1.7,display:"flex",gap:8,alignItems:"flex-start"}}>
           <span style={{fontSize:16,flexShrink:0}}>🔒</span>
           <span>Your code can only be used once. Once you submit, the code is permanently locked and cannot be reused.</span>
         </div>
@@ -277,6 +319,7 @@ export default function App() {
       <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:4}}>
         <div style={{fontSize:18,fontWeight:500}}>{candidateName}</div>
         <div style={{fontSize:11,padding:"2px 8px",borderRadius:12,background:C.bgSuccess,color:C.success,fontWeight:500}}>Submitted</div>
+        {timedOut&&<div style={{fontSize:11,padding:"2px 8px",borderRadius:12,background:C.bgWarning,color:C.warning,fontWeight:500}}>Time expired — auto-submitted</div>}
       </div>
       <div style={{fontSize:12,color:C.textSec,marginBottom:22}}>Code: {code.toUpperCase()} · {new Date().toLocaleDateString()}</div>
       <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12,marginBottom:28}}>
@@ -326,6 +369,9 @@ export default function App() {
   )
 
   const isDone=phase==="done"
+  const showTimer=!isDone&&timeLeft!=null
+  const lowTime=timeLeft!=null&&timeLeft<=10*60*1000
+  const critTime=timeLeft!=null&&timeLeft<=2*60*1000
   const tabBtn=(active,col)=>({padding:"7px 16px",fontSize:12,cursor:"pointer",borderRight:`0.5px solid ${C.border}`,whiteSpace:"nowrap",fontFamily:"var(--font-sans)",borderTop:active?`2px solid ${col}`:"2px solid transparent",background:active?C.bg2:"transparent",color:active?C.text:C.textMute,flexShrink:0,transition:"all .15s"})
 
   return (
@@ -340,6 +386,10 @@ export default function App() {
           {isDone&&<span style={{padding:"1px 7px",borderRadius:10,fontSize:10,background:C.bgSuccess,color:C.success,fontWeight:500}}>Submitted</span>}
         </div>
         <div style={{display:"flex",alignItems:"center",gap:10}}>
+          {showTimer&&<div title="Time remaining" style={{display:"flex",alignItems:"center",gap:6,padding:"5px 11px",borderRadius:8,border:`0.5px solid ${critTime?C.bdDanger:lowTime?C.bdWarn:C.border}`,background:critTime?C.bgDanger:lowTime?C.bgWarning:C.bg0,color:critTime?C.danger:lowTime?C.warning:C.textSec,fontFamily:"var(--font-mono)",fontSize:12.5,fontWeight:500}}>
+            <Clock size={13}/>
+            <span>{fmtTime(timeLeft)}</span>
+          </div>}
           <div style={{display:"flex",background:C.bg0,border:`0.5px solid ${C.border}`,borderRadius:8,padding:3,gap:3}}>
             {["quiz","results"].map(v=>(
               <button key={v} style={segBtn(panel===v)} onClick={()=>setPanel(v)}>

@@ -13,6 +13,9 @@ function doGet(e) {
     const sheet = ss.getSheetByName("Codes")
     if (!sheet) return respond({ valid: false, reason: "Codes sheet not found. Please set up the spreadsheet correctly." })
 
+    const DURATION_MIN = 90  // total time allowed — MUST match DURATION_MIN in src/App.jsx
+    const durationMs = DURATION_MIN * 60 * 1000
+
     const rows = sheet.getDataRange().getValues()
     for (let i = 1; i < rows.length; i++) {
       const rowCode = String(rows[i][0]).trim().toUpperCase()
@@ -21,7 +24,17 @@ function doGet(e) {
         if (status === "Used") {
           return respond({ valid: false, reason: "This code has already been used. Each code can only be submitted once. If you believe this is an error, please contact your administrator." })
         }
-        return respond({ valid: true, name: String(rows[i][1]).trim() || code })
+        // Server-anchored timer: stamp the start time in column G on the FIRST
+        // validation, then always return that same start time. This makes the
+        // 90-minute deadline follow the code — clearing the browser or switching
+        // devices can't reset it, because the clock lives here, not in the browser.
+        let startedAt = String(rows[i][6] || "").trim()
+        if (!startedAt) {
+          startedAt = new Date().toISOString()
+          sheet.getRange(i + 1, 7).setValue(startedAt)
+        }
+        const remainingMs = Math.max(0, durationMs - (new Date().getTime() - new Date(startedAt).getTime()))
+        return respond({ valid: true, name: String(rows[i][1]).trim() || code, startedAt: startedAt, durationMin: DURATION_MIN, remainingMs: remainingMs })
       }
     }
     return respond({ valid: false, reason: "Code not found. Please check your code and try again, or contact your administrator." })
