@@ -4,40 +4,60 @@
 //  Deploy as Web App: Execute as Me, Access: Anyone
 // ═══════════════════════════════════════════════════════════════
 
+// Total time allowed for the assessment. The clock is server-anchored and now
+// starts when the candidate clicks "start" (action=start) — NOT when they enter
+// their code — so time spent reading the instructions doesn't count against them.
+// MUST match DURATION_MIN in src/App.jsx.
+const DURATION_MIN = 90
+
 function doGet(e) {
   const action = e.parameter.action
   const code   = (e.parameter.code || "").trim().toUpperCase()
   const ss     = SpreadsheetApp.getActiveSpreadsheet()
+  const durationMs = DURATION_MIN * 60 * 1000
 
   if (action === "validate") {
     const sheet = ss.getSheetByName("Codes")
     if (!sheet) return respond({ valid: false, reason: "Codes sheet not found. Please set up the spreadsheet correctly." })
 
-    const DURATION_MIN = 90  // total time allowed — MUST match DURATION_MIN in src/App.jsx
-    const durationMs = DURATION_MIN * 60 * 1000
-
     const rows = sheet.getDataRange().getValues()
     for (let i = 1; i < rows.length; i++) {
-      const rowCode = String(rows[i][0]).trim().toUpperCase()
-      if (rowCode === code) {
+      if (String(rows[i][0]).trim().toUpperCase() === code) {
         const status = String(rows[i][2]).trim()
         if (status === "Used") {
           return respond({ valid: false, reason: "This code has already been used. Each code can only be submitted once. If you believe this is an error, please contact your administrator." })
         }
-        // Server-anchored timer: stamp the start time in column G on the FIRST
-        // validation, then always return that same start time. This makes the
-        // 90-minute deadline follow the code — clearing the browser or switching
-        // devices can't reset it, because the clock lives here, not in the browser.
+        // Do NOT start the clock here. If it was already started (e.g. the
+        // candidate reloaded mid-assessment), return the remaining time so the
+        // timer resumes; otherwise remainingMs is null and no timer runs yet.
+        const startedAt = String(rows[i][6] || "").trim()
+        const remainingMs = startedAt ? Math.max(0, durationMs - (Date.now() - new Date(startedAt).getTime())) : null
+        return respond({ valid: true, name: String(rows[i][1]).trim() || code, durationMin: DURATION_MIN, started: !!startedAt, remainingMs: remainingMs })
+      }
+    }
+    return respond({ valid: false, reason: "Code not found. Please check your code and try again, or contact your administrator." })
+  }
+
+  if (action === "start") {
+    // Start (or resume) the server-anchored clock — called when the candidate
+    // clicks "Enable recording & start assessment". Stamps column G once; every
+    // later call returns the same remaining time, so the deadline follows the
+    // code and can't be reset by reloading or switching devices.
+    const sheet = ss.getSheetByName("Codes")
+    if (!sheet) return respond({ started: false, reason: "Codes sheet not found" })
+    const rows = sheet.getDataRange().getValues()
+    for (let i = 1; i < rows.length; i++) {
+      if (String(rows[i][0]).trim().toUpperCase() === code) {
         let startedAt = String(rows[i][6] || "").trim()
         if (!startedAt) {
           startedAt = new Date().toISOString()
           sheet.getRange(i + 1, 7).setValue(startedAt)
         }
-        const remainingMs = Math.max(0, durationMs - (new Date().getTime() - new Date(startedAt).getTime()))
-        return respond({ valid: true, name: String(rows[i][1]).trim() || code, startedAt: startedAt, durationMin: DURATION_MIN, remainingMs: remainingMs })
+        const remainingMs = Math.max(0, durationMs - (Date.now() - new Date(startedAt).getTime()))
+        return respond({ started: true, durationMin: DURATION_MIN, remainingMs: remainingMs })
       }
     }
-    return respond({ valid: false, reason: "Code not found. Please check your code and try again, or contact your administrator." })
+    return respond({ started: false, reason: "Code not found" })
   }
 
   return respond({ error: "Unknown action" })
@@ -166,6 +186,19 @@ function getRecordingFolder(email, code, cachedLink) {
   const subName = (email ? email : code) + " — " + code
   const subs = root.getFoldersByName(subName)
   return subs.hasNext() ? subs.next() : root.createFolder(subName)
+}
+
+// SETUP CHECK — run this once from the editor (select testDriveAccess, click Run ▶)
+// after deploying. It forces the Drive authorization prompt and confirms THIS
+// account can reach the recordings folder. Success logs the folder name; failure
+// throws a clear permission error (View → Logs / Executions to read it). If this
+// throws, the account you're signed in as can't access RECORDINGS_ROOT_ID — make
+// sure the Web App is deployed by an account that owns or has Editor access to it.
+function testDriveAccess() {
+  const folder = DriveApp.getFolderById(RECORDINGS_ROOT_ID)
+  const child = folder.createFolder("__access_test__")
+  child.setTrashed(true)   // clean up the probe folder
+  Logger.log("OK — can read AND write to: " + folder.getName())
 }
 
 // Pull the Drive id out of a folder link like

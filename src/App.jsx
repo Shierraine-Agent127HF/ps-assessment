@@ -78,6 +78,14 @@ async function validateCode(url, code) {
   return res.json()
 }
 
+// Starts (or resumes) the server-anchored clock. Called when the candidate begins
+// the assessment, so instruction-reading time isn't counted. Returns remainingMs.
+async function startAssessmentTimer(url, code) {
+  const res = await fetch(`${url}?action=start&code=${encodeURIComponent(code)}`, { mode:"cors" })
+  if (!res.ok) throw new Error("Network error")
+  return res.json()
+}
+
 async function scoreEssayAI(question, hint, response) {
   const res = await fetch('/api/score-essay', {
     method: 'POST',
@@ -169,6 +177,9 @@ export default function App() {
         // Server-anchored countdown: trust the server's remaining time so the
         // deadline can't be reset by clearing the browser or switching devices.
         // (Older Apps Script without a timer omits remainingMs → no timer shown.)
+        // Only resume the timer if the clock was already started (e.g. a reload
+        // mid-assessment). For a fresh start, the clock begins later, when the
+        // candidate clicks "start" on the consent screen (see beginAssessment).
         if (typeof data.remainingMs === "number") setDeadline(Date.now() + data.remainingMs)
         // Gate the assessment behind the recording-consent screen — recording is mandatory.
         setPhase("consent")
@@ -195,6 +206,13 @@ export default function App() {
       })
       await rec.start()
       recorderRef.current = rec
+      // Start the server clock now — not at code entry — so time spent reading the
+      // instructions on this screen isn't counted. The server stamps the start once
+      // and is the source of truth; a later reload just resumes the remaining time.
+      try {
+        const t = await startAssessmentTimer(ASSESSMENT_URL, code.trim().toUpperCase())
+        if (t && typeof t.remainingMs === "number") setDeadline(Date.now() + t.remainingMs)
+      } catch {}
       setRecActive(true)
       setPhase("assessing")
     } catch (err) {
@@ -339,7 +357,7 @@ export default function App() {
       <div style={{maxWidth:380,width:"100%"}}>
         <div style={{fontSize:10,color:C.textMute,fontFamily:"var(--font-mono)",letterSpacing:"0.08em",marginBottom:6}}>helpflow.net // ps-assessment</div>
         <div style={{fontSize:26,fontWeight:500,color:C.text,fontFamily:"var(--font-sans)",marginBottom:6}}>PS Apprentice Assessment</div>
-        <div style={{fontSize:13,color:C.textSec,lineHeight:1.7,marginBottom:28}}>Enter your personal code to begin. You'll have {DURATION_MIN} minutes to complete it, and each code is single-use only.</div>
+        <div style={{fontSize:13,color:C.textSec,lineHeight:1.7,marginBottom:28}}>Enter your personal code to begin. You'll have {DURATION_MIN} minutes once you start, and each code is single-use only.</div>
 
         <div style={{fontSize:11,color:C.textMute,marginBottom:5}}>Your assessment code</div>
         <input value={code} onChange={e=>setCode(e.target.value.toUpperCase())} placeholder="e.g. HFPS001" style={{width:"100%",marginBottom:16,fontFamily:"var(--font-mono)",fontSize:16,letterSpacing:"0.14em"}} disabled={phase==="validating"} onKeyDown={e=>e.key==="Enter"&&handleValidate()} />
@@ -352,7 +370,7 @@ export default function App() {
 
         <div style={{marginTop:16,padding:"10px 12px",background:C.bgWarning,border:`0.5px solid ${C.bdWarn}`,borderRadius:6,fontSize:11,color:C.warning,lineHeight:1.7,display:"flex",gap:8,alignItems:"flex-start"}}>
           <span style={{fontSize:16,flexShrink:0}}>⏱️</span>
-          <span>You have <strong>{DURATION_MIN} minutes</strong>. The timer starts the moment you enter your code and keeps running even if you close the tab — so begin only when you're ready. When time runs out, your answers are submitted automatically.</span>
+          <span>You'll have <strong>{DURATION_MIN} minutes</strong>. The timer only starts on the next screen, when you begin — so you can read the instructions first. It keeps running even if you close the tab, and your answers submit automatically when time runs out.</span>
         </div>
         <div style={{marginTop:10,padding:"10px 12px",background:C.bg1,borderRadius:6,fontSize:11,color:C.textMute,lineHeight:1.7,display:"flex",gap:8,alignItems:"flex-start"}}>
           <span style={{fontSize:16,flexShrink:0}}>🔒</span>
@@ -374,8 +392,21 @@ export default function App() {
           <Video size={20} style={{color:C.accent}}/>
           <div style={{fontSize:22,fontWeight:500,color:C.text,fontFamily:"var(--font-sans)"}}>This assessment is recorded</div>
         </div>
-        <div style={{fontSize:13,color:C.textSec,lineHeight:1.7,marginBottom:20}}>
-          To keep the assessment fair, your <strong>screen</strong>, <strong>camera</strong>, and <strong>microphone</strong> are recorded for the full session. When you continue, your browser will ask you to share your screen and allow your camera — please accept both. Recording is required to take the assessment.
+        <div style={{fontSize:13,color:C.textSec,lineHeight:1.7,marginBottom:16}}>
+          Please read these before you start:
+        </div>
+        <div style={{display:"flex",flexDirection:"column",gap:11,marginBottom:20}}>
+          {[
+            {icon:"⏱️", text:<>You have <strong>{DURATION_MIN} minutes</strong>, starting when you click below. The timer keeps running even if you close the tab, and your answers submit automatically when it reaches zero.</>},
+            {icon:"🎥", text:<>Your <strong>screen, camera, and microphone are recorded</strong> the whole time. Share your <strong>entire screen</strong> and keep it shared — if you stop, you'll be asked to share again before you can continue.</>},
+            {icon:"📝", text:<>Answer <strong>every section</strong> — the questions and the short essays. Your progress saves automatically as you go.</>},
+            {icon:"🔒", text:<>Your code is <strong>single-use</strong>. Once you submit, it's locked and can't be reused.</>}
+          ].map((it,idx)=>(
+            <div key={idx} style={{display:"flex",gap:10,alignItems:"flex-start",fontSize:12.5,color:C.textSec,lineHeight:1.6}}>
+              <span style={{fontSize:15,flexShrink:0}}>{it.icon}</span>
+              <span>{it.text}</span>
+            </div>
+          ))}
         </div>
 
         {recError==="unsupported"?(
@@ -394,7 +425,7 @@ export default function App() {
 
         <div style={{marginTop:14,padding:"10px 12px",background:C.bg1,borderRadius:6,fontSize:11,color:C.textMute,lineHeight:1.7,display:"flex",gap:8,alignItems:"flex-start"}}>
           <span style={{fontSize:15,flexShrink:0}}>🖥️</span>
-          <span>When prompted, choose to share your <strong>entire screen</strong> for the recording to be valid. If you stop sharing during the assessment, you'll be asked to share again before you can continue.</span>
+          <span>Use a <strong>desktop computer</strong> with Chrome, Edge, or Firefox — recording isn't supported on phones or tablets. When prompted, allow both screen sharing and your camera.</span>
         </div>
       </div>
     </div>
