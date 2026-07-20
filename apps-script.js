@@ -60,6 +60,28 @@ function doGet(e) {
     return respond({ started: false, reason: "Code not found" })
   }
 
+  if (action === "diag") {
+    // Open <WebAppURL>?action=diag in a browser to check the LIVE web app:
+    //  • {"error":"Unknown action"}  → this URL is serving OLD code. The deployment
+    //    behind the URL in Vercel isn't the one you updated — see notes below.
+    //  • {"ok":true,...}             → Drive access works; the problem is elsewhere.
+    //  • {"ok":false,"error":"...permission..."} → the account under "runningAs"
+    //    can't reach the folder — add it as an Editor of RECORDINGS_ROOT_ID.
+    const out = { ok: false, rootId: RECORDINGS_ROOT_ID }
+    try { out.runningAs = Session.getEffectiveUser().getEmail() } catch (e) { out.runningAs = "(unknown)" }
+    try {
+      const folder = DriveApp.getFolderById(RECORDINGS_ROOT_ID)
+      out.folderName = folder.getName()
+      const probe = folder.createFolder("__diag_probe__")   // prove we can write
+      probe.setTrashed(true)
+      out.canWrite = true
+      out.ok = true
+    } catch (e) {
+      out.error = String(e)
+    }
+    return respond(out)
+  }
+
   return respond({ error: "Unknown action" })
 }
 
