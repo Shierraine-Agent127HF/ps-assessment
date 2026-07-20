@@ -20,20 +20,22 @@ export default async function handler(req, res) {
   // Free-tier Gemini flash model. Override with GEMINI_MODEL (e.g. gemini-3.5-flash).
   const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash'
 
-  const prompt = `You are evaluating a job application essay for a Product Specialist Apprentice role. The role values critical thinking, attention to detail, clear communication, and process improvement.
+  const prompt = `You are helping a hiring team score a short essay written by a HUMAN applicant for a Product Specialist Apprentice role — an entry-level position. These are real people writing in their own words, usually quickly and under a time limit, and many are not native English speakers.
+
+Judge the SUBSTANCE and SINCERITY of the answer, not the writing. Do NOT penalize grammar, spelling, phrasing, length, or a casual tone, and do not expect a polished or expert response — this is an apprentice applicant, not a professional writer. Reward a genuine, on-topic attempt.
 
 Question: ${question}
-Evaluator note: ${hint}
+Evaluator note (what a weaker vs stronger answer looks like): ${hint}
 Candidate response: ${response}
 
-Score using exactly one of three points — 1, 3, or 5 (do not use 2 or 4):
-1 = Below expectation — vague or generic, no concrete example, misses the point, or the reasoning doesn't hold up.
-3 = Meets expectation — a real, specific example with sound reasoning, but stays surface-level or leaves gaps.
-5 = Exceeds expectation — specific, insightful, and genuinely thoughtful, with clear reasoning and self-awareness.
+Score using exactly one of three points — 1, 3, or 5 (never 2 or 4):
+5 = Strong — on topic with a specific example or a genuinely thoughtful point, plus some real reasoning or self-awareness.
+3 = Solid, expected answer — a sincere, on-topic response that makes at least one real point, even if it stays general or leaves some gaps. This is the normal score for a genuine human effort.
+1 = Only when there is essentially no real attempt — blank, off-topic, a single throwaway line, self-contradictory, or generic filler with nothing of the applicant's own.
 
-If a response falls between two levels, round to the nearest of 1, 3, or 5.
+Be generous: most sincere, on-topic answers deserve at least a 3, and a 1 is reserved for answers that show no genuine effort. When an answer sits between two levels, round UP.
 
-Return ONLY valid JSON with no other text: {"score":N,"feedback":"1-2 specific sentences for the hiring team explaining the score"}`
+Return ONLY valid JSON with no other text: {"score":N,"feedback":"1-2 honest but fair sentences for the hiring team explaining the score"}`
 
   try {
     const apiRes = await fetch(
