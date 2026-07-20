@@ -438,7 +438,7 @@ export default function App() {
           <span style={{fontSize:16,flexShrink:0}}>⏱️</span>
           <span>You'll have <strong>{DURATION_MIN} minutes</strong>. The timer only starts on the next screen, when you begin — so you can read the instructions first. When time runs out, your answers submit automatically.</span>
         </div>
-        <div style={{marginTop:10,padding:"10px 12px",background:C.bg1,borderRadius:6,fontSize:11,color:C.textMute,lineHeight:1.7,display:"flex",gap:8,alignItems:"flex-start"}}>
+        <div style={{marginTop:10,padding:"10px 12px",background:C.bgDanger,border:`0.5px solid ${C.bdDanger}`,borderRadius:6,fontSize:11,color:C.danger,lineHeight:1.7,display:"flex",gap:8,alignItems:"flex-start"}}>
           <span style={{fontSize:16,flexShrink:0}}>🔒</span>
           <span>Your code can only be used once. Once you enter the assessment, the timer keeps running — even if you close the tab or switch devices — so begin only when you're ready to finish. After you submit, the code is permanently locked and cannot be reused.</span>
         </div>
