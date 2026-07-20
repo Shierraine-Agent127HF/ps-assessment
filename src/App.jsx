@@ -40,11 +40,11 @@ const SECS = [
     { type:"tf", tf:false, text:"When presenting a solution to a problem, giving a single strong recommendation is always more effective than presenting multiple options with trade-offs.", ex:"Sometimes one recommendation is right — but presenting trade-offs shows you've considered the full picture and respects that the decision-maker may have context you don't." }
   ]},
   { id:"es", title:"Essay Prompts", color:"#5c9a4f", Icon:FileText, qs:[
-    { type:"es", text:"Tell us about a process you've encountered — at school, work, or in daily life — that felt unnecessarily slow, manual, or repetitive. What made it frustrating, and how would you redesign it?", hint:"Red flag: vague frustration with no concrete example. Strong: names a real process, the actual friction, and a practical redesign idea." },
-    { type:"es", text:"What genuinely excites you about AI and automation — and what makes you cautious? We want both sides, honestly.", hint:"Red flag: pure enthusiasm with no caveats, or blanket skepticism. Strong: names something specific on both sides." },
-    { type:"es", text:"Describe a time you caught an error — in your own work or someone else's — before it caused a problem. What made you notice it, and what did you do?", hint:"Tests attention to detail + communication. Look for: specificity of the error, proactive flagging, diplomatic handling." },
-    { type:"es", text:"If you could change one thing about how teams typically manage requests and tasks — feature requests, bug reports, or projects — what would it be and why?", hint:"Weak: too personal or too vague. Strong: names a structural problem and proposes something that would scale." },
-    { type:"es", text:"You've just finished your first 30 days in this role. What would tell you that you're actually performing well — not just staying busy?", hint:"Tests results-orientation. Weak: describes activity. Strong: names specific outcomes and observable indicators." }
+    { type:"es", text:"Tell us about a process you've encountered — at school, work, or in daily life — that felt unnecessarily slow, manual, or repetitive. What made it frustrating, and how would you redesign it?", hint:"Red flag: vague frustration with no concrete example. Strong: names a real process, the actual friction, and a practical redesign idea.", tip:"Pick one real, specific process. Say exactly what's slow or manual and why it's frustrating, then describe one concrete way you'd redesign it. A specific example beats general complaints." },
+    { type:"es", text:"What genuinely excites you about AI and automation — and what makes you cautious? We want both sides, honestly.", hint:"Red flag: pure enthusiasm with no caveats, or blanket skepticism. Strong: names something specific on both sides.", tip:"Give both sides with real examples — one specific thing that excites you and one specific thing that makes you cautious. Balanced and specific beats pure hype or pure doubt." },
+    { type:"es", text:"Describe a time you caught an error — in your own work or someone else's — before it caused a problem. What made you notice it, and what did you do?", hint:"Tests attention to detail + communication. Look for: specificity of the error, proactive flagging, diplomatic handling.", tip:"Use the STAR method: Situation (what was happening), Task (what you were responsible for), Action (what you did), Result (what happened). Be specific about the error and how you flagged it." },
+    { type:"es", text:"If you could change one thing about how teams typically manage requests and tasks — feature requests, bug reports, or projects — what would it be and why?", hint:"Weak: too personal or too vague. Strong: names a structural problem and proposes something that would scale.", tip:"Name one specific, structural problem (not a personal gripe) and propose a fix that would work as the team grows. Explain the 'why' behind your idea." },
+    { type:"es", text:"You've just finished your first 30 days in this role. What would tell you that you're actually performing well — not just staying busy?", hint:"Tests results-orientation. Weak: describes activity. Strong: names specific outcomes and observable indicators.", tip:"Focus on outcomes, not activity. Name specific, observable signs you'd be doing well — results other people would notice — rather than just 'staying busy'." }
   ]}
 ]
 
@@ -737,6 +737,10 @@ export default function App() {
               </div>}
 
               {q.type==="es"&&<div>
+                {!isDone&&q.tip&&<div style={{marginBottom:12,padding:"10px 14px",background:C.bgAccent,borderRadius:6,fontSize:12.5,color:C.textSec,fontFamily:"var(--font-sans)",borderLeft:`3px solid ${C.bdAccent}`,lineHeight:1.6,display:"flex",gap:8,alignItems:"flex-start"}}>
+                  <span style={{fontSize:15,flexShrink:0}}>💡</span>
+                  <span><strong style={{color:C.accent}}>Tip: </strong>{q.tip}</span>
+                </div>}
                 <textarea value={essayTexts[qk]||""} onChange={e=>handleEssay(e.target.value)} placeholder="Write your response here…" rows={7} disabled={isDone} style={{width:"100%"}}/>
                 {!isDone&&<div style={{display:"flex",gap:8,marginTop:10,alignItems:"center"}}>
                   <button onClick={scoreEssay} disabled={!essayTexts[qk]?.trim()||scoring[qk]}
@@ -749,9 +753,6 @@ export default function App() {
                   <strong style={{color:aiScores[qk].score>=4?C.success:aiScores[qk].score>=3?C.warning:C.danger}}>{aiScores[qk].score}/5 — </strong>
                   {aiScores[qk].feedback}
                 </div>}
-                <div style={{marginTop:12,padding:"10px 14px",background:C.bg1,borderRadius:6,fontSize:11,color:C.textMute,fontFamily:"var(--font-sans)",borderLeft:`3px solid ${C.border}`,lineHeight:1.6}}>
-                  <strong style={{color:C.warning}}>Evaluator guidance: </strong>{q.hint}
-                </div>
               </div>}
 
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:24,paddingTop:18,borderTop:`0.5px solid ${C.border}`}}>
