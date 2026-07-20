@@ -82,7 +82,23 @@ function doGet(e) {
     return respond(out)
   }
 
+  if (action === "lastupload") {
+    // Open <WebAppURL>?action=lastupload after a test run to see the result of the
+    // most recent recording upload — without digging through the Executions log.
+    //  • {"ok":true,"savedBytes":123456,...}  → a clip was saved successfully.
+    //  • {"ok":false,"error":"...","b64len":N} → the clip arrived but failed to save.
+    //  • {"note":"No upload recorded yet."}    → no uploadChunk has reached the server.
+    const p = PropertiesService.getScriptProperties().getProperty("lastUpload")
+    return respond(p ? JSON.parse(p) : { note: "No upload recorded yet." })
+  }
+
   return respond({ error: "Unknown action" })
+}
+
+// Remember the outcome of the most recent uploadChunk so it can be read back via
+// ?action=lastupload (browser-friendly debugging).
+function recordLastUpload(obj) {
+  try { PropertiesService.getScriptProperties().setProperty("lastUpload", JSON.stringify(obj)) } catch (e) {}
 }
 
 function doPost(e) {
@@ -195,9 +211,11 @@ function handleUploadChunk(ss, code, data) {
     const file = folder.createFile(blob)
 
     Logger.log("uploadChunk saved: " + name + " (" + file.getSize() + " bytes) in folder " + folder.getName())
+    recordLastUpload({ ok: true, at: new Date().toISOString(), code: code, seg: data.segIndex, b64len: (data.dataBase64 || "").length, savedBytes: file.getSize(), file: name, folder: folder.getName() })
     return respond({ success: true, folderUrl: folder.getUrl() })
   } catch (err) {
     Logger.log("uploadChunk ERROR: " + err + (err && err.stack ? " | " + err.stack : ""))
+    recordLastUpload({ ok: false, at: new Date().toISOString(), code: code, seg: (data && data.segIndex), b64len: (data && data.dataBase64 || "").length, error: String(err) })
     return respond({ success: false, error: String(err) })
   }
 }
