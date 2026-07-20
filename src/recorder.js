@@ -1,27 +1,52 @@
 // ═══════════════════════════════════════════════════════════════
 //  AssessmentRecorder — Loom-style screen + webcam recording
 //
-//  Captures the candidate's screen with a webcam "bubble" composited
+//  Captures the candidate's screen(s) with a webcam "bubble" composited
 //  into the corner, records it in short segments, and uploads each
 //  segment to the Google Apps Script Web App (which files them into a
-//  per-applicant Google Drive folder). Framework-agnostic on purpose —
-//  App.jsx just constructs it, calls start()/stop(), and reads camStream
-//  for the on-screen self-view.
+//  per-applicant Google Drive folder).
+//
+//  Multi-monitor: getDisplayMedia() can only capture ONE surface per call,
+//  and there's no API to grab every monitor at once — so when the candidate
+//  has more than one screen we detect it and have them share each screen with
+//  its own click (a fresh user gesture is required per getDisplayMedia call).
+//  All shared screens are tiled side-by-side into the one recording.
+//
+//  Framework-agnostic on purpose — App.jsx drives it step by step:
+//    acquireScreen() ×N  →  acquireCamera()  →  buildAndStart()
 // ═══════════════════════════════════════════════════════════════
 
 // ── Tunables (single source of truth) ──
 const SEGMENT_MS = 120000   // length of each uploaded clip. ↑ = fewer files, more lost if the tab dies mid-segment
-const VIDEO_BPS  = 600000   // ~600 kbps video. ~90 min ≈ 450 MB/candidate. Drop to 400000 to roughly halve storage
+const VIDEO_BPS  = 600000   // ~600 kbps PER SCREEN. 1 screen ≈ 450 MB / 90 min; 2 screens ≈ double. Lower to save storage
 const AUDIO_BPS  = 64000    // microphone
 const FPS        = 12       // plenty for proctoring; keeps files small
-const CANVAS_W   = 1280
-const CANVAS_H   = 720
+const SLOT_W     = 1280     // per-screen slot width; canvas is SLOT_W × (screen count) wide
+const SLOT_H     = 720
 const BUBBLE_W   = 220      // webcam bubble width, bottom-right
 
 // getDisplayMedia is desktop-only and absent on every mobile browser.
 export function isRecordingSupported() {
   const md = navigator.mediaDevices
   return !!(md && md.getDisplayMedia && md.getUserMedia && window.MediaRecorder)
+}
+
+// How many screens the candidate has. Uses screen.isExtended (Chromium, no extra
+// permission) to know a second monitor exists, and getScreenDetails() for the
+// exact count when available. Falls back to 2 for an extended desktop of unknown
+// size, or 1 when we can't tell (non-Chromium) — best effort, not enforceable.
+export async function detectScreenCount() {
+  try {
+    const extended = !!(window.screen && window.screen.isExtended)
+    if (!extended) return 1
+    if (window.getScreenDetails) {
+      try {
+        const d = await window.getScreenDetails()
+        if (d && d.screens && d.screens.length) return d.screens.length
+      } catch { /* permission denied / needs gesture → fall through */ }
+    }
+    return 2
+  } catch { return 1 }
 }
 
 function pickMime() {
@@ -35,6 +60,12 @@ const sleep = ms => new Promise(r => setTimeout(r, ms))
 // contain-fit: scale (sw×sh) to sit fully inside (dw×dh), centered (letterboxed)
 function containFit(sw, sh, dw, dh) {
   const scale = Math.min(dw / sw, dh / sh)
+  const w = sw * scale, h = sh * scale
+  return { w, h, x: (dw - w) / 2, y: (dh - h) / 2 }
+}
+
+function coverFit(sw, sh, dw, dh) {
+  const scale = Math.max(dw / sw, dh / sh)
   const w = sw * scale, h = sh * scale
   return { w, h, x: (dw - w) / 2, y: (dh - h) / 2 }
 }
@@ -69,9 +100,13 @@ export class AssessmentRecorder {
     this.running = false
     this.segIndex = 0
     this.mime = pickMime()
+    this.videoBps = VIDEO_BPS
 
-    this.screenStream = null
+    this.screenStreams = []   // one per shared screen
+    this.screenVideos = []
+    this.lostSlots = new Set()   // screen slots whose sharing was stopped mid-session
     this.camStream = null
+    this.camVideo = null
     this.outStream = null
     this.currentRec = null
     this.cycleTimer = null
@@ -81,50 +116,52 @@ export class AssessmentRecorder {
     this.uploadQueue = []
     this.draining = false
 
-    this.screenVideo = null
-    this.camVideo = null
     this.canvas = null
     this.ctx = null
   }
 
   _status(msg) { try { this.onStatus && this.onStatus(msg) } catch {} }
 
-  // Acquire screen + camera, build the composite, and start segment recording.
-  // Throws (NotAllowedError, etc.) if the candidate denies or cancels — caller blocks the exam.
-  async start() {
+  // Share ONE screen. MUST be called directly from a click handler — getDisplayMedia
+  // needs a fresh user gesture, so each screen gets its own button click.
+  async acquireScreen() {
     if (!isRecordingSupported()) throw new Error("unsupported")
-    // getDisplayMedia needs the click gesture — request it first.
-    this.screenStream = await navigator.mediaDevices.getDisplayMedia({
-      video: { frameRate: FPS }, audio: false
-    })
-    try {
-      this.camStream = await navigator.mediaDevices.getUserMedia({
-        video: { width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 15 } },
-        audio: true
-      })
-    } catch (err) {
-      // Camera/mic denied → tear down the screen grab we already have, then rethrow.
-      try { this.screenStream.getTracks().forEach(t => t.stop()) } catch {}
-      throw err
-    }
+    const stream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: FPS }, audio: false })
+    this.screenStreams.push(stream)
+    return this.screenStreams.length
+  }
 
-    this.screenVideo = this._makeVideoEl(this.screenStream)
+  // Grab the webcam + mic. getUserMedia needs no user gesture, so this runs last,
+  // after all screens are shared.
+  async acquireCamera() {
+    if (this.camStream) return
+    this.camStream = await navigator.mediaDevices.getUserMedia({
+      video: { width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 15 } },
+      audio: true
+    })
     this.camVideo = this._makeVideoEl(this.camStream)
-    await Promise.all([this.screenVideo.play().catch(() => {}), this.camVideo.play().catch(() => {})])
+    await this.camVideo.play().catch(() => {})
+  }
+
+  // Build the composite (all screens tiled + webcam bubble) and start recording.
+  buildAndStart() {
+    const n = this.screenStreams.length || 1
+
+    this.screenVideos = this.screenStreams.map(s => this._makeVideoEl(s))
+    Promise.all(this.screenVideos.map(v => v.play().catch(() => {})))
+    this.screenStreams.forEach((_, i) => this._watchScreenEndSlot(i))
 
     this.canvas = document.createElement("canvas")
-    this.canvas.width = CANVAS_W
-    this.canvas.height = CANVAS_H
+    this.canvas.width = SLOT_W * n
+    this.canvas.height = SLOT_H
     this.ctx = this.canvas.getContext("2d")
-
     this.drawTimer = setInterval(() => this._drawFrame(), Math.round(1000 / FPS))
 
     this.outStream = this.canvas.captureStream(FPS)
-    const micTrack = this.camStream.getAudioTracks()[0]
+    const micTrack = this.camStream && this.camStream.getAudioTracks()[0]
     if (micTrack) this.outStream.addTrack(micTrack)
 
-    this._watchScreenEnd()
-
+    this.videoBps = VIDEO_BPS * n   // scale bitrate so each screen keeps its quality
     this.running = true
     this._startSegment()
     this.cycleTimer = setInterval(() => {
@@ -136,17 +173,28 @@ export class AssessmentRecorder {
     this._status("Recording")
   }
 
-  // Re-acquire the screen after the candidate hit "Stop sharing". The canvas /
-  // MediaRecorder keep running throughout, so this just swaps the screen source
-  // back in — no segment interruption. Camera + mic were never lost.
+  // Re-acquire the next screen whose sharing was stopped. Called from the re-share
+  // button (has a fresh gesture). Returns true once every lost screen is restored.
   async resume() {
+    const slot = this.lostSlots.values().next().value
+    if (slot === undefined) return true
     const stream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: FPS }, audio: false })
-    try { this.screenStream && this.screenStream.getTracks().forEach(t => t.stop()) } catch {}
-    this.screenStream = stream
-    this.screenVideo.srcObject = stream
-    await this.screenVideo.play().catch(() => {})
-    this._watchScreenEnd()
-    this._status("Recording")
+    try { this.screenStreams[slot] && this.screenStreams[slot].getTracks().forEach(t => t.stop()) } catch {}
+    this.screenStreams[slot] = stream
+    this.screenVideos[slot].srcObject = stream
+    await this.screenVideos[slot].play().catch(() => {})
+    this._watchScreenEndSlot(slot)
+    this.lostSlots.delete(slot)
+    if (this.lostSlots.size === 0) this._status("Recording")
+    return this.lostSlots.size === 0
+  }
+
+  // Tear down any streams acquired so far — used when setup is cancelled/errors.
+  abort() {
+    this.running = false
+    if (this.cycleTimer) { clearInterval(this.cycleTimer); this.cycleTimer = null }
+    if (this.drawTimer) { clearInterval(this.drawTimer); this.drawTimer = null }
+    this._teardownStreams()
   }
 
   _makeVideoEl(stream) {
@@ -157,35 +205,49 @@ export class AssessmentRecorder {
     return v
   }
 
-  _watchScreenEnd() {
-    const track = this.screenStream.getVideoTracks()[0]
+  _watchScreenEndSlot(i) {
+    const track = this.screenStreams[i].getVideoTracks()[0]
     if (!track) return
-    track.onended = () => { if (this.running) { this._status("Screen sharing stopped"); this.onScreenEnded && this.onScreenEnded() } }
+    track.onended = () => {
+      if (this.running) {
+        this.lostSlots.add(i)
+        this._status("Screen sharing stopped")
+        this.onScreenEnded && this.onScreenEnded()
+      }
+    }
   }
 
   _drawFrame() {
     const ctx = this.ctx
+    const W = this.canvas.width, H = this.canvas.height
     ctx.fillStyle = "#000"
-    ctx.fillRect(0, 0, CANVAS_W, CANVAS_H)
+    ctx.fillRect(0, 0, W, H)
 
-    const sv = this.screenVideo
-    if (sv && sv.videoWidth) {
-      const f = containFit(sv.videoWidth, sv.videoHeight, CANVAS_W, CANVAS_H)
-      ctx.drawImage(sv, f.x, f.y, f.w, f.h)
-    }
+    const n = this.screenVideos.length || 1
+    const slotW = W / n
+    this.screenVideos.forEach((sv, i) => {
+      if (sv && sv.videoWidth) {
+        const f = containFit(sv.videoWidth, sv.videoHeight, slotW, H)
+        ctx.drawImage(sv, i * slotW + f.x, f.y, f.w, f.h)
+      }
+      if (i > 0) {   // divider between screens
+        ctx.strokeStyle = "rgba(255,255,255,0.25)"
+        ctx.lineWidth = 2
+        ctx.beginPath(); ctx.moveTo(i * slotW, 0); ctx.lineTo(i * slotW, H); ctx.stroke()
+      }
+    })
 
     const cv = this.camVideo
     if (cv && cv.videoWidth) {
       const bw = BUBBLE_W
       const bh = Math.round(bw * cv.videoHeight / cv.videoWidth)
       const m = 20
-      const bx = CANVAS_W - bw - m
-      const by = CANVAS_H - bh - m
+      const bx = W - bw - m
+      const by = H - bh - m
       ctx.save()
       roundRectPath(ctx, bx, by, bw, bh, 12)
       ctx.clip()
-      // cover-fit the webcam into the bubble so it isn't distorted
-      const cf = this._coverFit(cv.videoWidth, cv.videoHeight, bw, bh)
+      const cf = coverFit(cv.videoWidth, cv.videoHeight, bw, bh)
       ctx.drawImage(cv, bx + cf.x, by + cf.y, cf.w, cf.h)
       ctx.restore()
       ctx.strokeStyle = "rgba(255,255,255,0.85)"
@@ -195,19 +257,13 @@ export class AssessmentRecorder {
     }
   }
 
-  _coverFit(sw, sh, dw, dh) {
-    const scale = Math.max(dw / sw, dh / sh)
-    const w = sw * scale, h = sh * scale
-    return { w, h, x: (dw - w) / 2, y: (dh - h) / 2 }
-  }
-
   _startSegment() {
     const idx = this.segIndex++
     const chunks = []
     let rec
     try {
       rec = new window.MediaRecorder(this.outStream, {
-        mimeType: this.mime, videoBitsPerSecond: VIDEO_BPS, audioBitsPerSecond: AUDIO_BPS
+        mimeType: this.mime, videoBitsPerSecond: this.videoBps, audioBitsPerSecond: AUDIO_BPS
       })
     } catch {
       rec = new window.MediaRecorder(this.outStream)
@@ -295,10 +351,11 @@ export class AssessmentRecorder {
   }
 
   _teardownStreams() {
-    for (const s of [this.outStream, this.screenStream, this.camStream]) {
+    const streams = [this.outStream, this.camStream, ...(this.screenStreams || [])]
+    for (const s of streams) {
       try { s && s.getTracks().forEach(t => t.stop()) } catch {}
     }
-    if (this.screenVideo) this.screenVideo.srcObject = null
+    ;(this.screenVideos || []).forEach(v => { if (v) v.srcObject = null })
     if (this.camVideo) this.camVideo.srcObject = null
   }
 }

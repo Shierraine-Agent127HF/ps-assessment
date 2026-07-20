@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react"
 import { Brain, Eye, Calendar, MessageSquare, Lightbulb, FileText, Sun, Moon, Clock, Video, MonitorUp, AlertTriangle } from "lucide-react"
-import { AssessmentRecorder, isRecordingSupported } from "./recorder"
+import { AssessmentRecorder, isRecordingSupported, detectScreenCount } from "./recorder"
 
 // ═══════════════ DATA ═══════════════════════════════════════════
 const SECS = [
@@ -132,6 +132,7 @@ export default function App() {
   const [recError, setRecError]       = useState("")     // "", "unsupported", "denied", or a message
   const [recActive, setRecActive]     = useState(false)  // recording is live → show the REC indicator
   const [screenLost, setScreenLost]   = useState(false)  // candidate stopped screen sharing → block until re-shared
+  const [shareStep, setShareStep]     = useState(null)   // multi-monitor: { needed, shared } while sharing each screen
   const editorRef = useRef(null)
   const autoSubmitRef = useRef(false)
   const recorderRef = useRef(null)
@@ -194,6 +195,18 @@ export default function App() {
   }
 
   // ── Recording lifecycle ──
+  const onRecError = (err) => {
+    const name = err && err.name
+    setRecError(name === "NotAllowedError" ? "denied" : (name === "NotFoundError" ? "nodevice" : (err && err.message) || "failed"))
+    // Roll back any partially-acquired streams so the next attempt starts clean.
+    try { recorderRef.current?.abort() } catch {}
+    recorderRef.current = null
+    setShareStep(null)
+  }
+
+  // First click: share screen 1, then figure out how many screens this candidate
+  // has. If more than one, we stay here and collect the rest one click at a time
+  // (getDisplayMedia needs a fresh gesture per screen).
   const beginAssessment = async () => {
     setRecError("")
     if (!isRecordingSupported()) { setRecError("unsupported"); return }
@@ -204,28 +217,56 @@ export default function App() {
         code: code.trim().toUpperCase(),
         onScreenEnded: () => setScreenLost(true)
       })
-      await rec.start()
       recorderRef.current = rec
-      // Start the server clock now — not at code entry — so time spent reading the
-      // instructions on this screen isn't counted. The server stamps the start once
-      // and is the source of truth; a later reload just resumes the remaining time.
-      try {
-        const t = await startAssessmentTimer(ASSESSMENT_URL, code.trim().toUpperCase())
-        if (t && typeof t.remainingMs === "number") setDeadline(Date.now() + t.remainingMs)
-      } catch {}
-      setRecActive(true)
-      setPhase("assessing")
-    } catch (err) {
-      const name = err && err.name
-      setRecError(name === "NotAllowedError" ? "denied" : (name === "NotFoundError" ? "nodevice" : (err && err.message) || "failed"))
-    } finally {
-      setRecStarting(false)
-    }
+      await rec.acquireScreen()                 // screen 1 — uses this click's gesture
+      const needed = await detectScreenCount()
+      rec._needed = needed
+      if (rec.screenStreams.length < needed) {
+        setShareStep({ needed, shared: rec.screenStreams.length })
+        setRecStarting(false)
+        return
+      }
+      await finalizeStart(rec)
+    } catch (err) { onRecError(err); setRecStarting(false) }
+  }
+
+  // Subsequent clicks for a multi-monitor candidate: share the next screen.
+  const addNextScreen = async () => {
+    setRecError(""); setRecStarting(true)
+    try {
+      const rec = recorderRef.current
+      await rec.acquireScreen()                 // next screen — this click's gesture
+      if (rec.screenStreams.length < rec._needed) {
+        setShareStep({ needed: rec._needed, shared: rec.screenStreams.length })
+        setRecStarting(false)
+        return
+      }
+      await finalizeStart(rec)
+    } catch (err) { onRecError(err); setRecStarting(false) }
+  }
+
+  // All screens shared → grab the camera, start recording, start the clock, go.
+  const finalizeStart = async (rec) => {
+    await rec.acquireCamera()
+    rec.buildAndStart()
+    // Start the server clock now — not at code entry — so time spent reading the
+    // instructions isn't counted. The server stamps the start once and is the
+    // source of truth; a later reload just resumes the remaining time.
+    try {
+      const t = await startAssessmentTimer(ASSESSMENT_URL, code.trim().toUpperCase())
+      if (t && typeof t.remainingMs === "number") setDeadline(Date.now() + t.remainingMs)
+    } catch {}
+    setShareStep(null)
+    setRecActive(true)
+    setRecStarting(false)
+    setPhase("assessing")
   }
 
   const handleReshare = async () => {
-    try { await recorderRef.current?.resume(); setScreenLost(false) }
-    catch { /* candidate cancelled again — keep the overlay up so they retry */ }
+    try {
+      const allRestored = await recorderRef.current?.resume()
+      if (allRestored) setScreenLost(false)   // more screens still need re-sharing → keep the overlay
+    } catch { /* candidate cancelled again — keep the overlay up so they retry */ }
   }
 
   // Bind the on-screen self-view to the live camera stream once we're recording.
@@ -398,7 +439,7 @@ export default function App() {
         <div style={{display:"flex",flexDirection:"column",gap:11,marginBottom:20}}>
           {[
             {icon:"⏱️", text:<>You have <strong>{DURATION_MIN} minutes</strong>, starting when you click below. The timer keeps running even if you close the tab, and your answers submit automatically when it reaches zero.</>},
-            {icon:"🎥", text:<>Your <strong>screen, camera, and microphone are recorded</strong> the whole time. Share your <strong>entire screen</strong> and keep it shared — if you stop, you'll be asked to share again before you can continue.</>},
+            {icon:"🎥", text:<>Your <strong>screen, camera, and microphone are recorded</strong> the whole time. Share your <strong>entire screen</strong> and keep it shared. If you use <strong>more than one monitor</strong>, you'll be asked to share each one.</>},
             {icon:"📝", text:<>Answer <strong>every section</strong> — the questions and the short essays. Your progress saves automatically as you go.</>},
             {icon:"🔒", text:<>Your code is <strong>single-use</strong>. Once you submit, it's locked and can't be reused.</>}
           ].map((it,idx)=>(
@@ -419,9 +460,20 @@ export default function App() {
           </div>
         ):null}
 
-        <button onClick={beginAssessment} disabled={recStarting} style={{...subBtn,width:"100%",fontSize:14,padding:"11px 20px",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
-          <MonitorUp size={16}/>{recStarting?"Waiting for permission…":"Enable recording & start assessment →"}
-        </button>
+        {shareStep && shareStep.shared < shareStep.needed ? (
+          <>
+            <div style={{padding:"10px 12px",background:C.bgSuccess,border:`0.5px solid ${C.bdSuccess}`,borderRadius:6,fontSize:12,color:C.success,marginBottom:12,lineHeight:1.6}}>
+              ✓ Screen {shareStep.shared} of {shareStep.needed} shared. You have more than one monitor — please share the next one. Pick a <strong>different screen</strong> each time.
+            </div>
+            <button onClick={addNextScreen} disabled={recStarting} style={{...subBtn,width:"100%",fontSize:14,padding:"11px 20px",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+              <MonitorUp size={16}/>{recStarting?"Waiting for permission…":`Share screen ${shareStep.shared + 1} of ${shareStep.needed} →`}
+            </button>
+          </>
+        ) : (
+          <button onClick={beginAssessment} disabled={recStarting} style={{...subBtn,width:"100%",fontSize:14,padding:"11px 20px",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+            <MonitorUp size={16}/>{recStarting?"Waiting for permission…":"Enable recording & start assessment →"}
+          </button>
+        )}
 
         <div style={{marginTop:14,padding:"10px 12px",background:C.bg1,borderRadius:6,fontSize:11,color:C.textMute,lineHeight:1.7,display:"flex",gap:8,alignItems:"flex-start"}}>
           <span style={{fontSize:15,flexShrink:0}}>🖥️</span>
