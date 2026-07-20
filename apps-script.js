@@ -161,8 +161,9 @@ const RECORDINGS_ROOT_ID = "1wz0iV5CTBquCRj8AlT6Yu4DQLa5fpfwv"
 // accept the new Drive authorization prompt.
 function handleUploadChunk(ss, code, data) {
   try {
+    Logger.log("uploadChunk in: code=" + code + " seg=" + data.segIndex + " b64len=" + ((data.dataBase64 || "").length))
     const codeSheet = ss.getSheetByName("Codes")
-    if (!codeSheet) return respond({ success: false, error: "Codes sheet not found" })
+    if (!codeSheet) { Logger.log("uploadChunk: Codes sheet not found"); return respond({ success: false, error: "Codes sheet not found" }) }
 
     const rows = codeSheet.getDataRange().getValues()
     let rowIndex = -1, email = "", folderLink = ""
@@ -174,7 +175,7 @@ function handleUploadChunk(ss, code, data) {
         break
       }
     }
-    if (rowIndex === -1) return respond({ success: false, error: "Code not found" })
+    if (rowIndex === -1) { Logger.log("uploadChunk: code not found: " + code); return respond({ success: false, error: "Code not found" }) }
 
     const folder = getRecordingFolder(email, code, folderLink)
     // Write the folder link into column H on the first clip (and repair it if the
@@ -190,10 +191,12 @@ function handleUploadChunk(ss, code, data) {
     const name = code + "_" + session + "_seg" + seg + ".webm"
     const bytes = Utilities.base64Decode(data.dataBase64 || "")
     const blob = Utilities.newBlob(bytes, mime, name)
-    folder.createFile(blob)
+    const file = folder.createFile(blob)
 
+    Logger.log("uploadChunk saved: " + name + " (" + file.getSize() + " bytes) in folder " + folder.getName())
     return respond({ success: true, folderUrl: folder.getUrl() })
   } catch (err) {
+    Logger.log("uploadChunk ERROR: " + err + (err && err.stack ? " | " + err.stack : ""))
     return respond({ success: false, error: String(err) })
   }
 }
