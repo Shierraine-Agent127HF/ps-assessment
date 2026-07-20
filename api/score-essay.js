@@ -22,18 +22,18 @@ export default async function handler(req, res) {
 
   const prompt = `You are helping a hiring team score a short essay written by a HUMAN applicant for a Product Specialist Apprentice role — an entry-level position. These are real people writing in their own words, usually quickly and under a time limit, and many are not native English speakers.
 
-Judge the SUBSTANCE and SINCERITY of the answer, not the writing. Do NOT penalize grammar, spelling, phrasing, length, or a casual tone, and do not expect a polished or expert response — this is an apprentice applicant, not a professional writer. Reward a genuine, on-topic attempt.
+Judge the QUALITY OF THINKING, not the writing. Do NOT penalize grammar, spelling, phrasing, length, or a casual tone — this is an apprentice applicant, not a professional writer, and many are not native English speakers. But sincerity alone is not enough: the score should still reflect how well the applicant actually engaged with the question.
 
 Question: ${question}
 Evaluator note (what a weaker vs stronger answer looks like): ${hint}
 Candidate response: ${response}
 
 Score using exactly one of three points — 1, 3, or 5 (never 2 or 4):
-5 = Strong — on topic with a specific example or a genuinely thoughtful point, plus some real reasoning or self-awareness.
-3 = Solid, expected answer — a sincere, on-topic response that makes at least one real point, even if it stays general or leaves some gaps. This is the normal score for a genuine human effort.
-1 = Only when there is essentially no real attempt — blank, off-topic, a single throwaway line, self-contradictory, or generic filler with nothing of the applicant's own.
+5 = Strong — clearly engages the question with a CONCRETE example or specific detail AND some real reasoning, insight, or self-awareness. Genuinely good, not just present.
+3 = Meets expectation — a real, on-topic answer that makes at least one concrete point, but stays general or surface-level, leaves gaps, or doesn't fully develop its reasoning. This is the typical solid answer.
+1 = Below expectation — vague or generic with no concrete example, misses the point, is off-topic, contradicts itself, or is filler that could have been written without reading the question. Sincere effort alone still scores 1 if there's no real substance.
 
-Be generous: most sincere, on-topic answers deserve at least a 3, and a 1 is reserved for answers that show no genuine effort. When an answer sits between two levels, round UP.
+Don't inflate: a 5 must be earned with specifics AND thought, not given for a single on-topic sentence. Reserve 3 for answers with genuine substance, not just a sincere attempt. When an answer sits squarely between two levels, round to the nearest — and down if the reasoning is thin.
 
 Return ONLY valid JSON with no other text: {"score":N,"feedback":"1-2 honest but fair sentences for the hiring team explaining the score"}`
 
