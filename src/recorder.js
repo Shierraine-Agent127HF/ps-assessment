@@ -41,9 +41,14 @@ export async function detectScreenCount() {
     if (!extended) return 1
     if (window.getScreenDetails) {
       try {
-        const d = await window.getScreenDetails()
+        // Race a timeout: getScreenDetails() can hang waiting on a permission that
+        // never resolves (or reject for lack of a gesture). Either way, fall back.
+        const d = await Promise.race([
+          window.getScreenDetails(),
+          new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), 2500))
+        ])
         if (d && d.screens && d.screens.length) return d.screens.length
-      } catch { /* permission denied / needs gesture → fall through */ }
+      } catch { /* permission denied / needs gesture / timed out → fall through */ }
     }
     return 2
   } catch { return 1 }

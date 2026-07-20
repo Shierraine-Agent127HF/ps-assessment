@@ -137,6 +137,10 @@ export default function App() {
   const autoSubmitRef = useRef(false)
   const recorderRef = useRef(null)
   const selfViewRef = useRef(null)
+  const svBoxRef    = useRef(null)   // draggable self-view container
+  const svDragRef   = useRef(null)   // {dx,dy} while dragging
+  const [svPos, setSvPos]           = useState(null)   // {left,top} once the self-view is dragged (null = default corner)
+  const [svDragging, setSvDragging] = useState(false)
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme)
@@ -267,6 +271,27 @@ export default function App() {
       const allRestored = await recorderRef.current?.resume()
       if (allRestored) setScreenLost(false)   // more screens still need re-sharing → keep the overlay
     } catch { /* candidate cancelled again — keep the overlay up so they retry */ }
+  }
+
+  // ── Drag-to-move for the recording self-view, so it never covers a question ──
+  const svPointerDown = (e) => {
+    const el = svBoxRef.current; if (!el) return
+    const r = el.getBoundingClientRect()
+    svDragRef.current = { dx: e.clientX - r.left, dy: e.clientY - r.top }
+    setSvDragging(true)
+    try { el.setPointerCapture(e.pointerId) } catch {}
+  }
+  const svPointerMove = (e) => {
+    if (!svDragRef.current) return
+    const el = svBoxRef.current
+    const w = el ? el.offsetWidth : 160, h = el ? el.offsetHeight : 120
+    const left = Math.max(0, Math.min(window.innerWidth  - w, e.clientX - svDragRef.current.dx))
+    const top  = Math.max(0, Math.min(window.innerHeight - h, e.clientY - svDragRef.current.dy))
+    setSvPos({ left, top })
+  }
+  const svPointerUp = (e) => {
+    svDragRef.current = null; setSvDragging(false)
+    try { svBoxRef.current?.releasePointerCapture(e.pointerId) } catch {}
   }
 
   // Bind the on-screen self-view to the live camera stream once we're recording.
@@ -439,6 +464,7 @@ export default function App() {
         <div style={{display:"flex",flexDirection:"column",gap:11,marginBottom:20}}>
           {[
             {icon:"⏱️", text:<>You have <strong>{DURATION_MIN} minutes</strong>, starting when you click below. The timer keeps running even if you close the tab, and your answers submit automatically when it reaches zero.</>},
+            {icon:"💻", text:<>Use <strong>Google Chrome on a desktop or laptop</strong>. Recording only works in Chrome — it will <strong>not</strong> work on phones, tablets, Safari, or other browsers.</>},
             {icon:"🎥", text:<>Your <strong>screen, camera, and microphone are recorded</strong> the whole time. Share your <strong>entire screen</strong> and keep it shared. If you use <strong>more than one monitor</strong>, you'll be asked to share each one.</>},
             {icon:"📝", text:<>Answer <strong>every section</strong> — the questions and the short essays. Your progress saves automatically as you go.</>},
             {icon:"🔒", text:<>Your code is <strong>single-use</strong>. Once you submit, it's locked and can't be reused.</>}
@@ -452,7 +478,7 @@ export default function App() {
 
         {recError==="unsupported"?(
           <div style={{padding:"12px 14px",background:C.bgDanger,border:`0.5px solid ${C.bdDanger}`,borderRadius:6,fontSize:13,color:C.danger,marginBottom:16,lineHeight:1.6}}>
-            Your browser can't screen-record. Please use a <strong>desktop</strong> Chrome, Edge, or Firefox (phones and tablets are not supported), then reopen this link.
+            This assessment only works in <strong>Google Chrome on a desktop or laptop</strong>. Your current browser can't screen-record — please open this link in Chrome, then try again.
           </div>
         ):recError?(
           <div style={{padding:"12px 14px",background:C.bgDanger,border:`0.5px solid ${C.bdDanger}`,borderRadius:6,fontSize:13,color:C.danger,marginBottom:16,lineHeight:1.6}}>
@@ -477,7 +503,7 @@ export default function App() {
 
         <div style={{marginTop:14,padding:"10px 12px",background:C.bg1,borderRadius:6,fontSize:11,color:C.textMute,lineHeight:1.7,display:"flex",gap:8,alignItems:"flex-start"}}>
           <span style={{fontSize:15,flexShrink:0}}>🖥️</span>
-          <span>Use a <strong>desktop computer</strong> with Chrome, Edge, or Firefox — recording isn't supported on phones or tablets. When prompted, allow both screen sharing and your camera.</span>
+          <span>When prompted, allow both <strong>screen sharing</strong> and your <strong>camera</strong> — the assessment can't start until you do.</span>
         </div>
       </div>
     </div>
@@ -547,13 +573,15 @@ export default function App() {
 
   return (
     <div style={root}>
-      {/* On-screen self-view — reassures the candidate that recording is live */}
+      {/* On-screen self-view — reassures the candidate that recording is live; drag to reposition */}
       {recActive&&!isDone&&(
-        <div style={{position:"fixed",bottom:16,left:16,zIndex:40,width:160,borderRadius:10,overflow:"hidden",border:`1px solid ${C.bStr}`,background:"#000",boxShadow:"0 6px 20px rgba(0,0,0,0.35)"}}>
-          <video ref={selfViewRef} autoPlay muted playsInline style={{display:"block",width:"100%",height:"auto",transform:"scaleX(-1)"}}/>
-          <div style={{position:"absolute",top:6,left:6,display:"flex",alignItems:"center",gap:5,padding:"2px 7px",borderRadius:20,background:"rgba(0,0,0,0.55)",color:"#fff",fontSize:10,fontFamily:"var(--font-mono)",letterSpacing:"0.06em"}}>
+        <div ref={svBoxRef} onPointerDown={svPointerDown} onPointerMove={svPointerMove} onPointerUp={svPointerUp} title="Drag to move"
+          style={{position:"fixed",zIndex:40,width:160,borderRadius:10,overflow:"hidden",border:`1px solid ${C.bStr}`,background:"#000",boxShadow:"0 6px 20px rgba(0,0,0,0.35)",cursor:svDragging?"grabbing":"grab",touchAction:"none",userSelect:"none",...(svPos?{left:svPos.left,top:svPos.top}:{left:16,bottom:16})}}>
+          <video ref={selfViewRef} autoPlay muted playsInline style={{display:"block",width:"100%",height:"auto",transform:"scaleX(-1)",pointerEvents:"none"}}/>
+          <div style={{position:"absolute",top:6,left:6,display:"flex",alignItems:"center",gap:5,padding:"2px 7px",borderRadius:20,background:"rgba(0,0,0,0.55)",color:"#fff",fontSize:10,fontFamily:"var(--font-mono)",letterSpacing:"0.06em",pointerEvents:"none"}}>
             <span style={{width:7,height:7,borderRadius:"50%",background:"#e04b4b",display:"inline-block"}}/>REC
           </div>
+          <div style={{position:"absolute",bottom:4,right:7,fontSize:9,color:"rgba(255,255,255,0.75)",fontFamily:"var(--font-sans)",pointerEvents:"none"}}>drag to move</div>
         </div>
       )}
 
