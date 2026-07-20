@@ -185,7 +185,8 @@ function handleUploadChunk(ss, code, data) {
       codeSheet.getRange(rowIndex + 1, 8).setValue(folder.getUrl())
     }
 
-    const mime = data.mime || "video/webm"
+    // Strip any ";codecs=..." parameters — the stored .webm only needs the base type.
+    const mime = String(data.mime || "video/webm").split(";")[0].trim() || "video/webm"
     const seg = String((data.segIndex != null ? data.segIndex : 0) + 1).padStart(3, "0")
     const session = String(data.sessionId || "0")
     const name = code + "_" + session + "_seg" + seg + ".webm"

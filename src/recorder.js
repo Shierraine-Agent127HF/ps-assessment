@@ -89,7 +89,14 @@ function blobToBase64(blob) {
   return new Promise((resolve, reject) => {
     const r = new FileReader()
     r.onerror = () => reject(r.error || new Error("read failed"))
-    r.onload = () => resolve(String(r.result).split(",")[1] || "")
+    r.onload = () => {
+      // Data URL is "data:<mediatype>;base64,<DATA>". The mediatype itself can
+      // contain commas (e.g. video/webm;codecs=vp9,opus), so split(",")[1] grabs
+      // the wrong piece and corrupts the upload — always slice after ";base64,".
+      const s = String(r.result)
+      const i = s.indexOf(";base64,")
+      resolve(i >= 0 ? s.slice(i + 8) : (s.split(",").pop() || ""))
+    }
     r.readAsDataURL(blob)
   })
 }
