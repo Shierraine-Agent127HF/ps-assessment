@@ -503,7 +503,7 @@ export default function App() {
 
         <div style={{marginTop:14,padding:"10px 12px",background:C.bg1,borderRadius:6,fontSize:11,color:C.textMute,lineHeight:1.7,display:"flex",gap:8,alignItems:"flex-start"}}>
           <span style={{fontSize:15,flexShrink:0}}>🖥️</span>
-          <span>When prompted, allow both <strong>screen sharing</strong> and your <strong>camera</strong> — the assessment can't start until you do.</span>
+          <span>When the picker opens, choose <strong>Entire Screen</strong> (not a Chrome tab or window), then allow both <strong>screen sharing</strong> and your <strong>camera</strong> — the assessment can't start until you do.</span>
         </div>
       </div>
     </div>
