@@ -25,6 +25,18 @@ const SLOT_W     = 1280     // per-screen slot width; canvas is SLOT_W × (scree
 const SLOT_H     = 720
 const BUBBLE_W   = 220      // webcam bubble width, bottom-right
 
+// getDisplayMedia picker constraints. `displaySurface: "monitor"` makes Chromium
+// open the picker on the "Entire Screen" pane and hide the "Window" and "Chrome
+// Tab" tabs — the assessment tiles full monitors, so tab/window shares aren't
+// usable and only confused candidates. `surfaceSwitching: "exclude"` drops the
+// "share a different tab instead" control so they can't switch away mid-session.
+// These are hints Chromium honors; non-Chromium browsers ignore them harmlessly.
+const SHARE_CONSTRAINTS = {
+  video: { frameRate: FPS, displaySurface: "monitor" },
+  audio: false,
+  surfaceSwitching: "exclude"
+}
+
 // getDisplayMedia is desktop-only and absent on every mobile browser.
 export function isRecordingSupported() {
   const md = navigator.mediaDevices
@@ -138,7 +150,7 @@ export class AssessmentRecorder {
   // needs a fresh user gesture, so each screen gets its own button click.
   async acquireScreen() {
     if (!isRecordingSupported()) throw new Error("unsupported")
-    const stream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: FPS }, audio: false })
+    const stream = await navigator.mediaDevices.getDisplayMedia(SHARE_CONSTRAINTS)
     this.screenStreams.push(stream)
     return this.screenStreams.length
   }
@@ -190,7 +202,7 @@ export class AssessmentRecorder {
   async resume() {
     const slot = this.lostSlots.values().next().value
     if (slot === undefined) return true
-    const stream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: FPS }, audio: false })
+    const stream = await navigator.mediaDevices.getDisplayMedia(SHARE_CONSTRAINTS)
     try { this.screenStreams[slot] && this.screenStreams[slot].getTracks().forEach(t => t.stop()) } catch {}
     this.screenStreams[slot] = stream
     this.screenVideos[slot].srcObject = stream
