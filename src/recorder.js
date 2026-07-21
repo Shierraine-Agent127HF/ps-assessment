@@ -74,6 +74,25 @@ function pickMime() {
 
 const sleep = ms => new Promise(r => setTimeout(r, ms))
 
+// Chrome's picker ALWAYS offers "Chrome Tab" and "Window" alongside "Entire
+// Screen" — there's no API to hide them (only monitorTypeSurfaces:"exclude",
+// which hides the screen, the opposite of what we want). So we enforce
+// entire-screen after the pick: the track reports what was shared via
+// getSettings().displaySurface ("monitor" | "window" | "browser"). Anything
+// that isn't a full monitor is stopped and rejected so the caller re-prompts.
+function assertEntireScreen(stream) {
+  const track = stream.getVideoTracks()[0]
+  const surface = track && track.getSettings ? track.getSettings().displaySurface : undefined
+  // Only reject when the browser actually tells us it's a tab/window. If the
+  // property is absent (older/non-Chromium), don't block — best effort.
+  if (surface && surface !== "monitor") {
+    try { stream.getTracks().forEach(t => t.stop()) } catch {}
+    const e = new Error("not-entire-screen")
+    e.name = "NotEntireScreenError"
+    throw e
+  }
+}
+
 // contain-fit: scale (sw×sh) to sit fully inside (dw×dh), centered (letterboxed)
 function containFit(sw, sh, dw, dh) {
   const scale = Math.min(dw / sw, dh / sh)
@@ -151,6 +170,7 @@ export class AssessmentRecorder {
   async acquireScreen() {
     if (!isRecordingSupported()) throw new Error("unsupported")
     const stream = await navigator.mediaDevices.getDisplayMedia(SHARE_CONSTRAINTS)
+    assertEntireScreen(stream)   // reject a Chrome-tab / window pick; caller re-prompts
     this.screenStreams.push(stream)
     return this.screenStreams.length
   }
@@ -203,6 +223,7 @@ export class AssessmentRecorder {
     const slot = this.lostSlots.values().next().value
     if (slot === undefined) return true
     const stream = await navigator.mediaDevices.getDisplayMedia(SHARE_CONSTRAINTS)
+    assertEntireScreen(stream)   // reject a Chrome-tab / window pick; caller re-prompts
     try { this.screenStreams[slot] && this.screenStreams[slot].getTracks().forEach(t => t.stop()) } catch {}
     this.screenStreams[slot] = stream
     this.screenVideos[slot].srcObject = stream

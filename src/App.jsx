@@ -201,7 +201,7 @@ export default function App() {
   // ── Recording lifecycle ──
   const onRecError = (err) => {
     const name = err && err.name
-    setRecError(name === "NotAllowedError" ? "denied" : (name === "NotFoundError" ? "nodevice" : (err && err.message) || "failed"))
+    setRecError(name === "NotAllowedError" ? "denied" : (name === "NotFoundError" ? "nodevice" : (name === "NotEntireScreenError" ? "notmonitor" : (err && err.message) || "failed")))
     // Roll back any partially-acquired streams so the next attempt starts clean.
     try { recorderRef.current?.abort() } catch {}
     recorderRef.current = null
@@ -482,7 +482,7 @@ export default function App() {
           </div>
         ):recError?(
           <div style={{padding:"12px 14px",background:C.bgDanger,border:`0.5px solid ${C.bdDanger}`,borderRadius:6,fontSize:13,color:C.danger,marginBottom:16,lineHeight:1.6}}>
-            {recError==="denied"?"Screen or camera access was blocked. Recording is required — please allow both when prompted and try again.":recError==="nodevice"?"No camera or microphone was found. Please connect one and try again.":"Couldn't start recording. Please try again."}
+            {recError==="denied"?"Screen or camera access was blocked. Recording is required — please allow both when prompted and try again.":recError==="nodevice"?"No camera or microphone was found. Please connect one and try again.":recError==="notmonitor"?"Please share your entire screen — not a Chrome tab or a window. Choose the Entire Screen option, pick your screen, then try again.":"Couldn't start recording. Please try again."}
           </div>
         ):null}
 
