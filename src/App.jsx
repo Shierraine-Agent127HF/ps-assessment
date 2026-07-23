@@ -127,6 +127,12 @@ export default function App() {
   const [timeLeft, setTimeLeft]     = useState(null)   // ms remaining (null = timer not started)
   const [timedOut, setTimedOut]     = useState(false)
   const [theme, setTheme]           = useState(() => { try { return localStorage.getItem("ps_theme") || "dark" } catch { return "dark" } })
+  // ── Admin review dashboard (entered via the admin code) ──
+  const [adminList, setAdminList]     = useState(null)   // null = loading, [] = none, [...] = submissions
+  const [adminError, setAdminError]   = useState("")
+  const [adminSel, setAdminSel]       = useState(null)   // selected sheet row number
+  const [adminDetail, setAdminDetail] = useState(null)   // { fields:[{label,value}] } or { error }
+  const [adminLoading, setAdminLoading] = useState(false)
   // ── Recording (screen + webcam, proctoring) ──
   const [recStarting, setRecStarting] = useState(false)  // permission prompts in flight
   const [recError, setRecError]       = useState("")     // "", "unsupported", "denied", or a message
@@ -176,6 +182,7 @@ export default function App() {
     setPhase("validating"); setCodeError("")
     try {
       const data = await validateCode(ASSESSMENT_URL, code.trim().toUpperCase())
+      if (data.admin) { setPhase("admin"); loadAdminList(); return }
       if (data.valid) {
         setCandidateName(data.name || code.trim().toUpperCase())
         restoreSession(code.trim().toUpperCase())
@@ -196,6 +203,32 @@ export default function App() {
       setCodeError("Cannot reach the assessment server. Please check the URL or contact your administrator.")
       setPhase("welcome")
     }
+  }
+
+  // ── Admin dashboard data (all requests re-send the admin code; the server
+  //    rejects anything that isn't the admin code before returning any data) ──
+  const adminCode = () => code.trim().toUpperCase()
+  const loadAdminList = async () => {
+    setAdminError(""); setAdminList(null); setAdminSel(null); setAdminDetail(null)
+    try {
+      const res = await fetch(`${ASSESSMENT_URL}?action=adminList&code=${encodeURIComponent(adminCode())}`, { mode:"cors" })
+      const data = await res.json()
+      if (data.applicants) setAdminList(data.applicants)
+      else { setAdminError(data.error || "Could not load submissions."); setAdminList([]) }
+    } catch { setAdminError("Cannot reach the server."); setAdminList([]) }
+  }
+  const openApplicant = async (row) => {
+    setAdminSel(row); setAdminDetail(null); setAdminLoading(true)
+    try {
+      const res = await fetch(`${ASSESSMENT_URL}?action=adminGet&code=${encodeURIComponent(adminCode())}&row=${row}`, { mode:"cors" })
+      const data = await res.json()
+      setAdminDetail(data.fields ? data : { error: data.error || "Could not load this submission." })
+    } catch { setAdminDetail({ error: "Cannot reach the server." }) }
+    setAdminLoading(false)
+  }
+  const adminSignOut = () => {
+    setPhase("welcome"); setCode(""); setCodeError("")
+    setAdminList(null); setAdminError(""); setAdminSel(null); setAdminDetail(null)
   }
 
   // ── Recording lifecycle ──
@@ -370,6 +403,9 @@ export default function App() {
     const payload={action:"submit",code:code.trim().toUpperCase(),timestamp:new Date().toISOString(),
       candidateName,objectiveScore:`${correctObj}/${TOTAL_OBJ}`,
       objectivePercent:`${Math.round((correctObj/TOTAL_OBJ)*100)}%`,
+      essayScore:`${essayTotal}/${essayMax}`,
+      essayPercent:`${essayMax?Math.round((essayTotal/essayMax)*100):0}%`,
+      overallScore:`${correctObj+essayTotal}/${TOTAL_OBJ+essayMax}`,
       objectiveResults:objRows,essayResults:esRows}
     if(ASSESSMENT_URL){
       try { await postToSheets(ASSESSMENT_URL,payload); setSubmitMsg("Saved!") }
@@ -441,6 +477,93 @@ export default function App() {
         <div style={{marginTop:10,padding:"10px 12px",background:C.bgDanger,border:`0.5px solid ${C.bdDanger}`,borderRadius:6,fontSize:11,color:C.danger,lineHeight:1.7,display:"flex",gap:8,alignItems:"flex-start"}}>
           <span style={{fontSize:16,flexShrink:0}}>🔒</span>
           <span>Your code can only be used once. Once you enter the assessment, the timer keeps running — even if you close the tab or switch devices — so begin only when you're ready to finish. After you submit, the code is permanently locked and cannot be reused.</span>
+        </div>
+      </div>
+    </div>
+  )
+
+  // ── Admin review dashboard (read-only; no test, no recording) ──
+  if(phase==="admin") return (
+    <div style={root}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"14px 22px",borderBottom:`0.5px solid ${C.border}`,flexShrink:0}}>
+        <div>
+          <div style={{fontSize:10,color:C.textMute,fontFamily:"var(--font-mono)",letterSpacing:"0.08em"}}>helpflow.net // ps-assessment</div>
+          <div style={{fontSize:18,fontWeight:500,color:C.text,fontFamily:"var(--font-sans)"}}>Admin — Submissions{adminList?` (${adminList.length})`:""}</div>
+        </div>
+        <div style={{display:"flex",gap:8,alignItems:"center"}}>
+          <button onClick={loadAdminList} style={navBtn}>↻ Refresh</button>
+          <button onClick={adminSignOut} style={navBtn}>Sign out</button>
+          <button onClick={toggleTheme} title="Toggle light / dark" style={iconBtn}>{theme==="dark"?<Sun size={15}/>:<Moon size={15}/>}</button>
+        </div>
+      </div>
+      <div style={{display:"flex",flex:1,overflow:"hidden"}}>
+        {/* Applicant list */}
+        <div style={{width:320,borderRight:`0.5px solid ${C.border}`,overflowY:"auto",flexShrink:0}}>
+          {adminList===null&&<div style={{padding:20,color:C.textSec,fontSize:13}}>Loading…</div>}
+          {adminError&&<div style={{padding:20,color:C.danger,fontSize:13,lineHeight:1.6}}>{adminError}</div>}
+          {adminList&&adminList.length===0&&!adminError&&<div style={{padding:20,color:C.textSec,fontSize:13}}>No submissions yet.</div>}
+          {adminList&&adminList.map(a=>(
+            <div key={a.row} onClick={()=>openApplicant(a.row)} style={{padding:"12px 16px",borderBottom:`0.5px solid ${C.border}`,cursor:"pointer",background:adminSel===a.row?C.bgAccent:"transparent"}}>
+              <div style={{fontSize:13,fontWeight:500,color:C.text,fontFamily:"var(--font-sans)"}}>{a.name||"(no name)"}</div>
+              <div style={{fontSize:11,color:C.textMute,fontFamily:"var(--font-mono)"}}>{a.code}</div>
+              <div style={{fontSize:11,color:C.textSec,marginTop:3,fontFamily:"var(--font-sans)"}}>Overall {a.overallScore||"—"} · Obj {a.objectivePercent||"—"} · Essay {a.essayPercent||"—"}</div>
+              <div style={{fontSize:10,color:C.textMute,marginTop:2,fontFamily:"var(--font-sans)"}}>{a.timestamp}</div>
+            </div>
+          ))}
+        </div>
+        {/* Detail */}
+        <div style={{flex:1,overflowY:"auto",padding:"22px 28px"}}>
+          {!adminSel&&<div style={{color:C.textSec,fontSize:13}}>Select an applicant on the left to view their answers.</div>}
+          {adminSel&&adminLoading&&<div style={{color:C.textSec,fontSize:13}}>Loading answers…</div>}
+          {adminSel&&!adminLoading&&adminDetail?.error&&<div style={{color:C.danger,fontSize:13}}>{adminDetail.error}</div>}
+          {adminSel&&!adminLoading&&adminDetail?.fields&&(()=>{
+            const F=adminDetail.fields
+            const summaryLabels=["Timestamp","Code","Candidate Email","Objective Score","Objective %","Essay Score","Essay %","Overall Score"]
+            const summary=F.filter(f=>summaryLabels.includes(f.label))
+            const qA=F.filter(f=>/^Q\d+ Answer$/.test(f.label))
+            const qC=F.filter(f=>/^Q\d+ Correct/.test(f.label))
+            const eS=F.filter(f=>/^Essay \d+ Score$/.test(f.label))
+            const eF=F.filter(f=>/^Essay \d+ Feedback$/.test(f.label))
+            const eR=F.filter(f=>/^Essay \d+ Response$/.test(f.label))
+            return (<>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))",gap:10,marginBottom:24}}>
+                {summary.map(f=>(
+                  <div key={f.label} style={{background:C.bg1,borderRadius:8,padding:"10px 12px"}}>
+                    <div style={{fontSize:10,color:C.textMute,textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:3}}>{f.label}</div>
+                    <div style={{fontSize:14,color:C.text,fontWeight:500,wordBreak:"break-word"}}>{f.value||"—"}</div>
+                  </div>
+                ))}
+              </div>
+              {qA.length>0&&<>
+                <div style={{fontSize:13,fontWeight:600,color:C.text,marginBottom:10,fontFamily:"var(--font-sans)"}}>Objective answers</div>
+                <div style={{display:"flex",flexWrap:"wrap",gap:8,marginBottom:26}}>
+                  {qA.map((f,i)=>{
+                    const cor=String(qC[i]?.value||"").toLowerCase()
+                    const good=cor==="yes",bad=cor==="no"
+                    return (
+                      <div key={f.label} style={{border:`0.5px solid ${good?C.bdSuccess:bad?C.bdDanger:C.border}`,background:good?C.bgSuccess:bad?C.bgDanger:"transparent",borderRadius:7,padding:"6px 10px",minWidth:64}}>
+                        <div style={{fontSize:10,color:C.textMute}}>{f.label.replace(" Answer","")}</div>
+                        <div style={{fontSize:12.5,fontWeight:600,color:good?C.success:bad?C.danger:C.text}}>{f.value||"—"}</div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </>}
+              {eR.length>0&&<>
+                <div style={{fontSize:13,fontWeight:600,color:C.text,marginBottom:10,fontFamily:"var(--font-sans)"}}>Essays</div>
+                {eR.map((f,i)=>(
+                  <div key={f.label} style={{marginBottom:16,border:`0.5px solid ${C.border}`,borderRadius:8,padding:"13px 15px"}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                      <div style={{fontSize:12,fontWeight:600,color:C.text}}>Essay {i+1}</div>
+                      <div style={{fontSize:12,color:C.accent,fontWeight:500}}>Score: {eS[i]?.value||"—"}</div>
+                    </div>
+                    {eF[i]?.value&&<div style={{fontSize:12,color:C.textSec,fontStyle:"italic",marginBottom:9,lineHeight:1.5}}>AI feedback: {eF[i].value}</div>}
+                    <div style={{fontSize:13,color:C.text,whiteSpace:"pre-wrap",lineHeight:1.65}}>{f.value||"(blank)"}</div>
+                  </div>
+                ))}
+              </>}
+            </>)
+          })()}
         </div>
       </div>
     </div>

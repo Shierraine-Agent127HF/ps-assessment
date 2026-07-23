@@ -1,0 +1,160 @@
+{
+  "name": "PS Assessment → Slack notification",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## PS Assessment → Slack — setup (3 things)\n\n**1. Google Sheets credential**\nClick the \"New Assessment Result\" node → connect your Google account → then pick:\n• Document: PS Assessment sheet\n• Sheet: **Assessment Result** tab (verify the dropdown!)\n\n**2. Slack bot token**\nOpen the \"Build Slack Message\" node → replace `xoxb-REPLACE-WITH-YOUR-BOT-TOKEN`\nwith your Bot User OAuth Token (chat:write scope, bot invited to the channel).\nChannel is already set to C07532VA22X.\n\n**3. Activate**\nToggle the workflow Active (top-right). It polls every minute; a new row in\nAssessment Result posts a scored message + a threaded recording link.\n\n_Test: add a dummy row to Assessment Result, or click \"Test workflow\"._",
+        "height": 460,
+        "width": 420
+      },
+      "id": "note-setup",
+      "name": "Setup — read me",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -40,
+        -260
+      ]
+    },
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "documentId": {
+          "__rl": true,
+          "value": "1A5ptgnbJHfqE95P0xBod6mdM08PUguWtHinVlEnjIIY",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "446900861",
+          "mode": "id"
+        },
+        "event": "rowAdded",
+        "options": {}
+      },
+      "id": "trigger-1",
+      "name": "New Assessment Result",
+      "type": "n8n-nodes-base.googleSheetsTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const row = $json;\n\n// ─── EDIT THESE TWO ───────────────────────────────────────────\nconst SLACK_TOKEN   = 'xoxb-REPLACE-WITH-YOUR-BOT-TOKEN';\nconst SLACK_CHANNEL = 'C07532VA22X';\nconst RECORDINGS_ROOT = 'https://drive.google.com/drive/folders/1wz0iV5CTBquCRj8AlT6Yu4DQLa5fpfwv';\n// ──────────────────────────────────────────────────────────────\n\n// \"83%\" or \"72\" -> 83 / 72 ; blank/NaN -> null\nfunction num(v) { const n = parseFloat(String(v == null ? '' : v)); return isNaN(n) ? null : n; }\n// \"28/37\" -> 75.67 (percent) ; unparseable / zero denominator -> null\nfunction frac(v) { const p = String(v == null ? '' : v).split('/'); const a = parseFloat(p[0]); const b = parseFloat(p[1]); return (b && !isNaN(a)) ? (a / b) * 100 : null; }\n// Overall flag: green Pass >= 70, yellow Review >= 50, else red Fail\nfunction passFlag(p) { if (p == null) return { e: '⚪', l: 'N/A' }; if (p >= 70) return { e: '🟢', l: 'Pass' }; if (p >= 50) return { e: '🟡', l: 'Review' }; return { e: '🔴', l: 'Fail' }; }\n// Essay flag: green Excellent >= 80, yellow Good >= 60, else red Needs work\nfunction essayFlag(p) { if (p == null) return { e: '⚪', l: 'N/A' }; if (p >= 80) return { e: '🟢', l: 'Excellent' }; if (p >= 60) return { e: '🟡', l: 'Good' }; return { e: '🔴', l: 'Needs work' }; }\n\nconst name     = row['Candidate Email'] || row['Code'] || 'Applicant';\nconst code     = String(row['Code'] == null ? '' : row['Code']).trim();\nconst objScore = row['Objective Score'] || '';\nconst objPct   = row['Objective %'] || '';\nconst essScore = row['Essay Score'] || '';\nconst essPct   = row['Essay %'] || '';\nconst overall  = row['Overall Score'] || '';\n\nconst oPct    = frac(overall);\nconst oFlag   = passFlag(oPct);\nconst eFlag   = essayFlag(num(essPct));\nconst oPctStr = oPct == null ? '—' : Math.round(oPct) + '%';\n\nconst slackText =\n  oFlag.e + '  *' + name + ' — completed the assessment*\\n\\n' +\n  '*Objective Score:*  ' + objScore + '  (' + objPct + ')\\n' +\n  '*Essay Score:*  ' + essScore + '  (' + essPct + ')  →  ' + eFlag.e + ' ' + eFlag.l + '\\n' +\n  '*Overall Score:*  ' + overall + '  (' + oPctStr + ')  →  ' + oFlag.e + ' ' + oFlag.l;\n\nconst threadText =\n  '📹 Recording: ' + RECORDINGS_ROOT + '\\n_Open the subfolder named_  *' + name + ' — ' + code + '*';\n\nreturn { json: { slackToken: SLACK_TOKEN, slackChannel: SLACK_CHANNEL, slackText: slackText, threadText: threadText } };\n"
+      },
+      "id": "code-1",
+      "name": "Build Slack Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        260,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://slack.com/api/chat.postMessage",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.slackToken }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json; charset=utf-8",
+        "body": "={{ JSON.stringify({ channel: $json.slackChannel, text: $json.slackText, unfurl_links: false }) }}",
+        "options": {}
+      },
+      "id": "http-main",
+      "name": "Post to Slack",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        520,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://slack.com/api/chat.postMessage",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Build Slack Message').item.json.slackToken }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json; charset=utf-8",
+        "body": "={{ JSON.stringify({ channel: $('Build Slack Message').item.json.slackChannel, thread_ts: $json.ts, text: $('Build Slack Message').item.json.threadText, unfurl_links: false }) }}",
+        "options": {}
+      },
+      "id": "http-reply",
+      "name": "Reply with Recording",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        780,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "New Assessment Result": {
+      "main": [
+        [
+          {
+            "node": "Build Slack Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Slack Message": {
+      "main": [
+        [
+          {
+            "node": "Post to Slack",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Post to Slack": {
+      "main": [
+        [
+          {
+            "node": "Reply with Recording",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "active": false
+}
